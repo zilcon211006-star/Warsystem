@@ -188,6 +188,7 @@
     <div class="login-box">
         <h2>⚔️ 司令部ログイン</h2>
         <input type="text" id="loginCountry" placeholder="国名 (例: A国)" value="A国">
+        <input type="password" id="loginPassword" placeholder="パスワード" style="margin-top:10px;">
         <button class="btn btn-primary" style="margin-top:14px;" onclick="handleLogin()">作戦開始</button>
     </div>
 </div>
@@ -298,6 +299,7 @@ const DRAG_THRESHOLD = 10;
 let cachedSupplyMap = null;
 let cachedDeployableStates = null;
 let cachedDeployablePlayer = null;
+let handOverride = null;
 
 // 送信後にローカルで差し引く手札軍事力（UI反映用）
 let localCommittedHand = 0; // 送信済み配置命令の累計
@@ -370,9 +372,7 @@ function getStateAvailableMilitary(stateId) {
 }
 
 function getAvailableHandMilitary() {
-    const myData = countryDataList.find(r => r[0] === currentPlayer);
-    if (!myData) return 0;
-    const hand = parseInt(myData[1]) || 0;
+    const hand = getCurrentHandMilitary(currentPlayer);
     return Math.max(0, hand - localCommittedHand - getPendingDeployTotal());
 }
 
@@ -414,9 +414,74 @@ function getCountryFulfillment(countryName = currentPlayer) {
     return row ? row[6] : '';
 }
 
+function getCurrentHandMilitary(countryName = currentPlayer) {
+    const row = getCountryRow(countryName);
+    const base = row ? (parseInt(row[1]) || 0) : 0;
+    if (countryName === currentPlayer && handOverride !== null && !Number.isNaN(handOverride)) return handOverride;
+    return base;
+}
+
+function buildCountryStateBundle(country) {
+    const oi = ownerIdx();
+    const myRows = mapData.filter(r => oi >= 0 && r[oi] === country);
+    const myStates = myRows.map(r => r[0]);
+    return {
+        myRows,
+        myStates,
+        myStateSet: new Set(myStates),
+        capitals: myRows.filter(r => getFlag(r) === '首都').map(r => r[0]),
+        bases: myRows.filter(r => getFlag(r) === '基地').map(r => r[0]),
+        ports: myRows.filter(r => getFlag(r) === '港').map(r => r[0]),
+    };
+}
+
+function bfsWithinOwnStates(seedIds, allowedSet, bestFactory) {
+    const best = {};
+    const queue = [];
+    seedIds.forEach(id => {
+        if (!allowedSet.has(id) || best[id]) return;
+        best[id] = bestFactory();
+        queue.push(id);
+    });
+    let head = 0;
+    while (head < queue.length) {
+        const cur = queue[head++];
+        const curInfo = best[cur];
+        (adjacency[cur] || []).forEach(nb => {
+            if (!allowedSet.has(nb)) return;
+            const cand = curInfo.next(nb);
+            if (!best[nb] || cand.betterThan(best[nb])) {
+                best[nb] = cand;
+                queue.push(nb);
+            }
+        });
+    }
+    return best;
+}
+
+function getAutoSeaPortSet(country) {
+    const bundle = buildCountryStateBundle(country);
+    if (bundle.capitals.length === 0 || bundle.ports.length < 2) return new Set();
+
+    const reachable = new Set(bundle.capitals);
+    const queue = [...bundle.capitals];
+    let head = 0;
+    while (head < queue.length) {
+        const cur = queue[head++];
+        (adjacency[cur] || []).forEach(nb => {
+            if (!bundle.myStateSet.has(nb) || reachable.has(nb)) return;
+            reachable.add(nb);
+            queue.push(nb);
+        });
+    }
+
+    const capitalConnectedPortExists = bundle.ports.some(id => reachable.has(id));
+    return capitalConnectedPortExists ? new Set(bundle.ports) : new Set();
+}
+
 function getOverlayScale() {
     const zoom = panZoomInstance ? panZoomInstance.getZoom() : 1;
-    return clamp(1 / Math.pow(Math.max(zoom, 1), 0.22), 0.72, 1.28);
+    return clamp(1 / Math.pow(Math.max(zoom, 1), 0.16), 0.82, 1.42);
 }
 
 function syncPendingStateUI() {
@@ -454,13 +519,29 @@ function applyDeployToState(stateId, addPower) {
 // =========================================================
 // LOGIN & SVG LOAD
 // =========================================================
-function handleLogin() {
-    const val = document.getElementById('loginCountry').value.trim();
-    if (!val) return alert("国名を入力してください");
-    currentPlayer = val;
-    document.getElementById('playerDisplay').textContent = currentPlayer;
-    document.getElementById('login-overlay').style.display = 'none';
-    loadSVG().then(() => { loadGameData(); initUI(); });
+async function handleLogin() {
+    const country = document.getElementById('loginCountry').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    if (!country) return alert("国名を入力してください");
+    if (!password) return alert("パスワードを入力してください");
+
+    try {
+        const res = await fetch(API_URL);
+        const data = await res.json();
+        countryDataList = data.CountryData ? data.CountryData.slice(1) : [];
+        const row = countryDataList.find(r => r[0] === country);
+        if (!row) return alert("その国は存在しません");
+        const expectedPassword = String(row[2] || '');
+        if (String(password) !== expectedPassword) return alert("パスワードが違います");
+
+        currentPlayer = country;
+        document.getElementById('playerDisplay').textContent = currentPlayer;
+        document.getElementById('login-overlay').style.display = 'none';
+        loadSVG().then(() => { loadGameData(); initUI(); switchMode(); });
+    } catch (err) {
+        console.error(err);
+        alert("ログイン情報の確認に失敗しました");
+    }
 }
 
 function loadSVG() {
@@ -498,10 +579,20 @@ function loadGameData() {
     .then(r => r.json())
     .then(data => {
         if (data.MapData)       { mapHeaders = data.MapData[0]; mapData = data.MapData.slice(1); invalidateDerivedCaches(); setupTabs(); renderMap(); }
-        if (data.CountryData)   { countryDataList = data.CountryData.slice(1); updateCountryStatsUI(); setupDiplomacyUI(); }
+        if (data.CountryData)   {
+            countryDataList = data.CountryData.slice(1);
+            const loadedRow = getCountryRow(currentPlayer);
+            const loadedHand = loadedRow ? (parseInt(loadedRow[1]) || 0) : null;
+            if (handOverride !== null && loadedHand === handOverride) handOverride = null;
+            localCommittedHand = 0;
+            pendingGarrisons = {};
+            updateCountryStatsUI();
+            syncPendingStateUI();
+            setupDiplomacyUI();
+        }
         if (data.AdjacencyData) { processAdjacency(data.AdjacencyData); }
         if (data.WarData)       { warData = data.WarData.slice(1); updateWarListUI(); }
-        if (data.QueueData)     { serverQueueData = data.QueueData.slice(1); renderServerQueue(); }
+        if (data.QueueData)     { serverQueueData = data.QueueData.slice(1); renderServerQueue(); renderMap(); }
     })
     .catch(err => console.error(err));
 }
@@ -518,7 +609,7 @@ function processAdjacency(raw) {
 function updateCountryStatsUI() {
     const myData = getCountryRow(currentPlayer);
     if (!myData) return;
-    const hand = parseInt(myData[1]) || 0;
+    const hand = getCurrentHandMilitary(currentPlayer);
     const remaining = Math.max(0, hand - localCommittedHand - getPendingDeployTotal());
     const militaryEl = document.getElementById('statMilitary');
     const techEl = document.getElementById('statTech');
@@ -542,109 +633,36 @@ function calcSupply() {
 
     const oi = ownerIdx(), di = devIdx();
     if (oi < 0) return {};
-
+    const rowById = Object.fromEntries(mapData.map(r => [r[0], r]));
     const supplyMap = {};
     const countries = [...new Set(mapData.map(r => r[oi]).filter(Boolean))];
-    const rowById = Object.fromEntries(mapData.map(r => [r[0], r]));
 
-    const isBetter = (cand, prev) => {
-        if (!cand) return false;
-        if (!prev) return true;
-        if (cand.dist !== prev.dist) return cand.dist < prev.dist;
-        if (cand.dev !== prev.dev) return cand.dev > prev.dev;
-        return (cand.base || 0) > (prev.base || 0);
-    };
-
-    const bfsBest = (seedIds, allowedSet, baseScore) => {
-        const best = {};
-        const queue = [];
-        seedIds.forEach(id => {
-            if (!allowedSet.has(id) || best[id]) return;
-            best[id] = { dist: 0, dev: 0, base: baseScore };
-            queue.push(id);
-        });
-
-        let head = 0;
-        while (head < queue.length) {
-            const cur = queue[head++];
-            const curInfo = best[cur];
-            (adjacency[cur] || []).forEach(nb => {
-                if (!allowedSet.has(nb)) return;
-                const nbRow = rowById[nb];
-                const cand = {
-                    dist: curInfo.dist + 1,
-                    dev: curInfo.dev + (nbRow ? (parseFloat(nbRow[di]) || 0) : 0),
-                    base: baseScore,
-                };
-                if (isBetter(cand, best[nb])) {
-                    best[nb] = cand;
-                    queue.push(nb);
-                }
-            });
+    const makeNode = (dist, dev, base) => ({
+        dist, dev, base,
+        next(nb) {
+            const row = rowById[nb];
+            return makeNode(this.dist + 1, this.dev + (row ? (parseFloat(row[di]) || 0) : 0), base);
+        },
+        betterThan(prev) {
+            if (this.dist !== prev.dist) return this.dist < prev.dist;
+            if (this.dev !== prev.dev) return this.dev > prev.dev;
+            return this.base > prev.base;
         }
-        return best;
-    };
+    });
 
     countries.forEach(country => {
-        const myRows = mapData.filter(r => r[oi] === country);
-        const myStates = myRows.map(r => r[0]);
-        const myStateSet = new Set(myStates);
-        const capitals = myRows.filter(r => getFlag(r) === '首都').map(r => r[0]);
-        const ports = myRows.filter(r => getFlag(r) === '港').map(r => r[0]);
-        const routes = new Set(myRows.filter(r => getFlag(r) === '航路').map(r => r[0]));
+        const bundle = buildCountryStateBundle(country);
+        const landBest = bfsWithinOwnStates(bundle.capitals, bundle.myStateSet, () => makeNode(0, 0, 100));
+        const autoSeaPorts = [...getAutoSeaPortSet(country)];
+        const seaBest = bfsWithinOwnStates(autoSeaPorts, bundle.myStateSet, () => makeNode(0, 0, 40));
 
-        // 1) 首都起点：自国領土のみ、最短ルート優先、同距離なら開発度合計最大
-        const landBest = capitals.length ? bfsBest(capitals, myStateSet, 100) : {};
-
-        // 2) 海上補給起点：首都から陸路で到達できる港 → 航路ネットワークでつながる港群 を種にする
-        const landOnlySet = new Set(myStates.filter(id => !routes.has(id)));
-        const capitalLandReach = new Set();
-        const landQueue = [];
-        capitals.forEach(id => {
-            if (!landOnlySet.has(id) || capitalLandReach.has(id)) return;
-            capitalLandReach.add(id);
-            landQueue.push(id);
-        });
-        let head = 0;
-        while (head < landQueue.length) {
-            const cur = landQueue[head++];
-            (adjacency[cur] || []).forEach(nb => {
-                if (!landOnlySet.has(nb) || capitalLandReach.has(nb)) return;
-                capitalLandReach.add(nb);
-                landQueue.push(nb);
-            });
-        }
-        const capitalConnectedPorts = ports.filter(id => capitalLandReach.has(id));
-
-        const seaAllowed = new Set([...ports, ...routes]);
-        const seaNetworkReach = new Set();
-        const seaQueue = [];
-        capitalConnectedPorts.forEach(id => {
-            if (!seaAllowed.has(id) || seaNetworkReach.has(id)) return;
-            seaNetworkReach.add(id);
-            seaQueue.push(id);
-        });
-        head = 0;
-        while (head < seaQueue.length) {
-            const cur = seaQueue[head++];
-            (adjacency[cur] || []).forEach(nb => {
-                if (!seaAllowed.has(nb) || seaNetworkReach.has(nb)) return;
-                seaNetworkReach.add(nb);
-                seaQueue.push(nb);
-            });
-        }
-        const maritimeSeedPorts = ports.filter(id => seaNetworkReach.has(id));
-        const seaBest = maritimeSeedPorts.length ? bfsBest(maritimeSeedPorts, myStateSet, 40) : {};
-
-        myStates.forEach(stateId => {
+        bundle.myStates.forEach(stateId => {
             const land = landBest[stateId] || null;
             const sea = seaBest[stateId] || null;
-            const chosen = isBetter(land, sea) ? land : (isBetter(sea, land) ? sea : (land || sea));
-            if (!chosen) {
-                supplyMap[stateId] = 0;
-                return;
-            }
-            supplyMap[stateId] = Math.max(0, Math.round((chosen.base || 0) - (5 * chosen.dist) + (chosen.dev || 0)));
+            let chosen = null;
+            if (land && sea) chosen = land.betterThan(sea) ? land : sea.betterThan(land) ? sea : land;
+            else chosen = land || sea;
+            supplyMap[stateId] = chosen ? Math.max(0, Math.round(chosen.base - (5 * chosen.dist) + chosen.dev)) : 0;
         });
     });
 
@@ -659,30 +677,22 @@ function calcSupply() {
 function getDeployableStates() {
     if (cachedDeployableStates && cachedDeployablePlayer === currentPlayer) return cachedDeployableStates;
 
-    const oi = ownerIdx();
-    if (oi < 0) return new Set();
-
-    const myRows = mapData.filter(r => r[oi] === currentPlayer);
-    const myStates = myRows.map(r => r[0]);
-    const myStateSet = new Set(myStates);
-    const seaRoutes = new Set(myRows.filter(r => getFlag(r) === '航路').map(r => r[0]));
-
+    const bundle = buildCountryStateBundle(currentPlayer);
     const reachable = new Set();
     const queue = [];
+    const seeds = [...new Set([...bundle.capitals, ...bundle.bases, ...getAutoSeaPortSet(currentPlayer)])];
 
-    myRows.forEach(r => {
-        const f = getFlag(r);
-        if (f === '首都' || f === '基地') { reachable.add(r[0]); queue.push(r[0]); }
-    });
-    seaRoutes.forEach(sid => {
-        if (!reachable.has(sid)) { reachable.add(sid); queue.push(sid); }
+    seeds.forEach(id => {
+        if (!bundle.myStateSet.has(id) || reachable.has(id)) return;
+        reachable.add(id);
+        queue.push(id);
     });
 
     let head = 0;
     while (head < queue.length) {
         const cur = queue[head++];
         (adjacency[cur] || []).forEach(nb => {
-            if (!myStateSet.has(nb) || reachable.has(nb)) return;
+            if (!bundle.myStateSet.has(nb) || reachable.has(nb)) return;
             reachable.add(nb);
             queue.push(nb);
         });
@@ -1059,7 +1069,12 @@ function sendMilitaryUpdates() {
     .then(r=>r.json())
     .then(data=>{
         alert(data.message||"配置を反映しました");
-        localCommittedHand += spent;
+        if (data.remainingMilitary !== undefined && data.remainingMilitary !== null && data.remainingMilitary !== '') {
+            handOverride = Math.max(0, parseInt(data.remainingMilitary) || 0);
+            localCommittedHand = 0;
+        } else {
+            localCommittedHand += spent;
+        }
         pendingGarrisons = {};
         syncPendingStateUI();
         updateCountryStatsUI();
@@ -1195,17 +1210,17 @@ function renderMap() {
         if (!r) return;
 
         const owner = getOwner(r);
-        const ownerColor = getCountryColor(owner, clrI > -1 ? r[clrI] : '#2a2e3a');
-        let fill = '#1e2330';
+        const ownerColor = owner ? getCountryColor(owner, clrI > -1 ? r[clrI] : '#586274') : '#586274';
+        let fill = '#2b3240';
 
         if (isSupplyTab) {
             fill = getGradientColorBy100(supplyMap[p.id] || 0);
         } else if (currentTab === '地形(1-4)') {
-            fill = tColors[String(r[ci])] || '#2a2e3a';
+            fill = tColors[String(r[ci])] || '#3a4354';
         } else if (currentTab === '首都プラグ') {
             fill = getFlagVisual(getFlag(r) || String(r[ci] || '')).color;
         } else if (['国','所有国'].includes(currentTab)) {
-            fill = ownerColor;
+            fill = owner ? ownerColor : '#4a5366';
         } else if (currentTab === '軍事力') {
             fill = getGradientColorBy100(militaryPreview[p.id] || 0);
         } else if (String(currentTab).includes('開発')) {
@@ -1213,22 +1228,24 @@ function renderMap() {
         } else {
             const v = parseFloat(r[ci]) || 0;
             const intensity = Math.min(1, v / 200);
-            const rr = Math.round(20 + 200*intensity);
-            const gg = Math.round(20 + 20*(1-intensity));
-            fill = `rgb(${rr},${gg},20)`;
+            const rr = Math.round(28 + 190 * intensity);
+            const gg = Math.round(30 + 36 * (1 - intensity));
+            const bb = Math.round(30 + 14 * (1 - intensity));
+            fill = `rgb(${rr},${gg},${bb})`;
         }
 
-        let stroke = ownerColor;
+        let stroke = owner ? '#9aa5b5' : '#b6c0d0';
         if (currentTab === '首都プラグ') {
             const flagInfo = getFlagVisual(getFlag(r) || String(r[ci] || ''));
             stroke = flagInfo.stroke;
         }
-        if (getOwner(r) === currentPlayer) stroke = '#f1c40f';
+        if (owner === currentPlayer) stroke = '#f1c40f';
 
         p.style.fill = fill;
         p.style.stroke = stroke;
-        p.style.strokeWidth = getOwner(r)===currentPlayer ? '1.6px' : '0.7px';
-        if (getOwner(r) === currentPlayer) p.parentNode.appendChild(p);
+        p.style.strokeWidth = owner === currentPlayer ? '1.8px' : '1px';
+        p.style.opacity = '1';
+        if (owner === currentPlayer) p.parentNode.appendChild(p);
     });
 
     const innerSvg = document.querySelector('#wrapper svg');
