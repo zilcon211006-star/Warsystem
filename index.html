@@ -460,9 +460,10 @@ function bfsWithinOwnStates(seedIds, allowedSet, bestFactory) {
 }
 
 function getAutoSeaPortSet(country) {
+    // 補給ネットワーク用: 港2つ以上が条件（変更なし）
     const bundle = buildCountryStateBundle(country);
     if (bundle.capitals.length === 0 || bundle.ports.length < 2) return new Set();
-
+ 
     const reachable = new Set(bundle.capitals);
     const queue = [...bundle.capitals];
     let head = 0;
@@ -474,7 +475,7 @@ function getAutoSeaPortSet(country) {
             queue.push(nb);
         });
     }
-
+ 
     const capitalConnectedPortExists = bundle.ports.some(id => reachable.has(id));
     return capitalConnectedPortExists ? new Set(bundle.ports) : new Set();
 }
@@ -578,14 +579,21 @@ function loadGameData() {
     fetch(API_URL)
     .then(r => r.json())
     .then(data => {
-        if (data.MapData)       { mapHeaders = data.MapData[0]; mapData = data.MapData.slice(1); invalidateDerivedCaches(); setupTabs(); renderMap(); }
-        if (data.CountryData)   {
+        if (data.MapData) {
+            mapHeaders = data.MapData[0];
+            mapData    = data.MapData.slice(1);
+            invalidateDerivedCaches();
+            setupTabs();
+            renderMap();
+        }
+        if (data.CountryData) {
             countryDataList = data.CountryData.slice(1);
-            const loadedRow = getCountryRow(currentPlayer);
+            // handOverride がサーバー値と一致していればクリア（初代のロジックを保持）
+            const loadedRow  = getCountryRow(currentPlayer);
             const loadedHand = loadedRow ? (parseInt(loadedRow[1]) || 0) : null;
             if (handOverride !== null && loadedHand === handOverride) handOverride = null;
             localCommittedHand = 0;
-            pendingGarrisons = {};
+            pendingGarrisons   = {};
             updateCountryStatsUI();
             syncPendingStateUI();
             setupDiplomacyUI();
@@ -594,7 +602,10 @@ function loadGameData() {
         if (data.WarData)       { warData = data.WarData.slice(1); updateWarListUI(); }
         if (data.QueueData)     { serverQueueData = data.QueueData.slice(1); renderServerQueue(); renderMap(); }
     })
-    .catch(err => console.error(err));
+    .catch(err => {
+        console.error(err);
+        alert("データの取得に失敗しました。通信状況を確認してください。");
+    });
 }
 
 function processAdjacency(raw) {
@@ -896,24 +907,36 @@ function handleMapClick(id) {
 // 攻撃バリデーション
 // =========================================================
 function checkAdjacency(from, to) {
-    const fAdj = adjacency[from]||[], tAdj = adjacency[to]||[];
+    const fAdj = adjacency[from] || [];
+    const tAdj = adjacency[to]   || [];
     // 陸路隣接
-    if (fAdj.includes(to)) return { ok:true, sea:false };
-    // 海路: From が港、To が海に面している
-    const fromR   = mapData.find(x => x[0] === from);
+    if (fAdj.includes(to)) return { ok: true, sea: false };
+    // 海路: From が自国の港ステート かつ 双方が「海」に隣接
     const myPorts = getMyPortStates();
-    if (myPorts.has(from) && fAdj.includes('海') && tAdj.includes('海')) return { ok:true, sea:true };
-    return { ok:false, sea:false };
+    if (myPorts.has(from) && fAdj.includes('海') && tAdj.includes('海')) {
+        return { ok: true, sea: true };
+    }
+    return { ok: false, sea: false };
 }
-
+ 
 function checkAttackValid(from, to) {
     const adj = checkAdjacency(from, to);
     if (!adj.ok) { alert("隣接なし / 海路不可（Fromに港が必要です）"); return false; }
-    // 海路攻撃の場合、Toも海に面している必要あり（adj判定済み）
-    const r = mapData.find(x => x[0] === to);
+ 
+    const r  = mapData.find(x => x[0] === to);
     const tc = r ? getOwner(r) : null;
+ 
+    // 所有国が存在し、自国でも中立でも空でもない場合 → 宣戦布告チェック
     if (tc && tc !== currentPlayer && tc !== "中立" && tc !== "") {
-        if (!(window.myEnemies||[]).includes(tc)) { alert("宣戦布告が必要です"); return false; }
+        if (!(window.myEnemies || []).includes(tc)) {
+            alert("宣戦布告が必要です");
+            return false;
+        }
+    }
+    // 所有国が存在しない（無所属）ステートへの攻撃も宣戦布告なしでは不可
+    if (!tc || tc === "") {
+        alert("無所属ステートには攻撃できません");
+        return false;
     }
     return true;
 }
@@ -1062,15 +1085,25 @@ function loadGameData() {
 function sendMilitaryUpdates() {
     const entries = Object.entries(pendingGarrisons);
     if (entries.length === 0) return alert("配置変更がありません");
-    const btn = document.getElementById('btnUpdateMilitary');
+    const btn   = document.getElementById('btnUpdateMilitary');
     const spent = getPendingDeployTotal();
     btn.disabled = true; btn.textContent = "適用中...";
-    fetch(API_URL, { method:'POST', body: JSON.stringify({ action:"UPDATE_MILITARY", country:currentPlayer, updates:pendingGarrisons, spentHand: spent }) })
-    .then(r=>r.json())
-    .then(data=>{
-        alert(data.message||"配置を反映しました");
-        if (data.remainingMilitary !== undefined && data.remainingMilitary !== null && data.remainingMilitary !== '') {
-            handOverride = Math.max(0, parseInt(data.remainingMilitary) || 0);
+    fetch(API_URL, {
+        method: 'POST',
+        body: JSON.stringify({
+            action:   "UPDATE_MILITARY",
+            country:  currentPlayer,
+            updates:  pendingGarrisons,
+            spentHand: spent
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        alert(data.message || "配置を反映しました");
+        if (data.remainingMilitary !== undefined &&
+            data.remainingMilitary !== null &&
+            data.remainingMilitary !== '') {
+            handOverride       = Math.max(0, parseInt(data.remainingMilitary) || 0);
             localCommittedHand = 0;
         } else {
             localCommittedHand += spent;
@@ -1078,10 +1111,11 @@ function sendMilitaryUpdates() {
         pendingGarrisons = {};
         syncPendingStateUI();
         updateCountryStatsUI();
-        loadGameData();
+        // サーバー書き込み完了を待ってからデータ再取得
+        setTimeout(() => loadGameData(), 800);
     })
-    .catch(()=>alert("エラーが発生しました"))
-    .finally(()=>{ btn.disabled=false; btn.textContent="配置を適用"; });
+    .catch(() => alert("エラーが発生しました"))
+    .finally(() => { btn.disabled = false; btn.textContent = "配置を適用"; });
 }
 
 
@@ -1160,8 +1194,13 @@ function updateWarListUI() {
 function declareWar() {
     const t = document.getElementById('targetCountrySelect').value;
     if (!t || !confirm(`${t} に宣戦布告しますか？`)) return;
-    fetch(API_URL,{method:'POST',body:JSON.stringify({action:"DECLARE_WAR",declarer:currentPlayer,target:t})})
-    .then(r=>r.json()).then(d=>{ alert(d.message); if(d.status==='success') loadGameData(); });
+    fetch(API_URL, {
+        method: 'POST',
+        body: JSON.stringify({ action: "DECLARE_WAR", declarer: currentPlayer, target: t })
+    })
+    .then(r => r.json())
+    .then(d => { alert(d.message); if (d.status === 'success') loadGameData(); })
+    .catch(() => alert("宣戦布告の送信に失敗しました。通信状況を確認してください。"));
 }
 
 // =========================================================
