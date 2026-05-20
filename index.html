@@ -1,942 +1,1488 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ステートデータ管理</title>
-<script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>統合マップ・軍事シミュレータ v7.0</title>
+    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <style>
+        /* ===== DARK THEME BASE ===== */
+        *, *::before, *::after { box-sizing: border-box; }
+        :root {
+            --bg:       #12151a;
+            --bg2:      #1a1f28;
+            --bg3:      #222834;
+            --border:   #2e3646;
+            --accent:   #3d8ef0;
+            --accent2:  #27ae60;
+            --danger:   #c0392b;
+            --warn:     #e67e22;
+            --text:     #d0d8e8;
+            --text2:    #8899b0;
+            --gold:     #f1c40f;
+            --panel-hdr:#1a2540;
+        }
+        body {
+            font-family: "Helvetica Neue", Arial, sans-serif;
+            margin: 0; padding: 0; overflow: hidden;
+            height: 100vh; width: 100vw;
+            background: var(--bg); color: var(--text);
+            touch-action: none;
+        }
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        /* flash */
+        @keyframes flash-animation {
+            0%  { fill:#fff; stroke:#fff; stroke-width:3px; }
+            50% { fill:#ffe066; stroke:#ff4444; stroke-width:2px; }
+            100%{ stroke-width:inherit; }
+        }
+        .flashing { animation:flash-animation 1s ease-out; fill:#fff !important; stroke:#f00 !important; }
 
-:root {
-  --bg:       #0d0f14;
-  --bg2:      #13161e;
-  --bg3:      #1a1f2b;
-  --bg4:      #222838;
-  --border:   #2a3148;
-  --border2:  #3a4560;
-  --accent:   #4f8ef7;
-  --accent2:  #7c3aed;
-  --green:    #22c55e;
-  --amber:    #f59e0b;
-  --red:      #ef4444;
-  --text:     #c8d3e8;
-  --text2:    #6b7a99;
-  --text3:    #3d4a65;
-  --gold:     #fbbf24;
-  --panel-w:  340px;
-}
+        /* ===== LOGIN ===== */
+        #login-overlay {
+            position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:9999;
+            display:flex; justify-content:center; align-items:center;
+        }
+        .login-box {
+            background:var(--bg2); border:1px solid var(--border); padding:28px 24px;
+            border-radius:10px; text-align:center; width:85%; max-width:320px;
+            box-shadow:0 8px 32px rgba(0,0,0,0.6);
+        }
+        .login-box h2 { margin:0 0 16px; color:var(--text); font-size:1.2em; }
+        .login-box input {
+            background:var(--bg3); border:1px solid var(--border); color:var(--text);
+            border-radius:6px; padding:10px; width:100%; font-size:1em;
+        }
 
-html, body { height: 100%; overflow: hidden; }
+        /* ===== TABS ===== */
+        #tab-controls {
+            position:absolute; left:0; width:100%;
+            pointer-events:none; z-index:50; display:flex; justify-content:center;
+        }
+        @media(min-width:769px){ #tab-controls{ bottom:20px; } }
+        @media(max-width:768px){ #tab-controls{ bottom:36vh; } }
 
-body {
-  font-family: 'Syne', sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  display: flex;
-  flex-direction: column;
-}
+        .control-bar {
+            background:rgba(20,26,38,0.95); padding:5px 10px; border-radius:30px;
+            pointer-events:auto; display:flex; gap:5px;
+            box-shadow:0 2px 12px rgba(0,0,0,0.5); overflow-x:auto; max-width:95%;
+            -webkit-overflow-scrolling:touch; border:1px solid var(--border);
+        }
+        .control-bar button {
+            padding:5px 10px; border:1px solid var(--border); background:var(--bg3);
+            border-radius:12px; cursor:pointer; font-size:0.78em; font-weight:bold;
+            color:var(--text2); white-space:nowrap; transition:all .15s;
+        }
+        .control-bar button:hover { background:var(--bg2); color:var(--text); }
+        .control-bar button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
 
-/* ── HEADER ── */
-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 0 20px;
-  height: 52px;
-  background: var(--bg2);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  z-index: 10;
-}
+        /* ===== MAP ===== */
+        #map-container { position:absolute; inset:0; z-index:1; }
+        #wrapper { width:100%; height:100%; cursor:grab; }
 
-header h1 {
-  font-size: 1.05rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  color: var(--text);
-}
+        /* ===== PANELS ===== */
+        .floating-panel {
+            background:var(--bg2); border:1px solid var(--border); z-index:100;
+            display:flex; flex-direction:column; overflow:hidden;
+            box-shadow:0 6px 24px rgba(0,0,0,0.6);
+        }
+        .panel-header {
+            padding:8px 12px; background:var(--panel-hdr); color:var(--text);
+            cursor:move; font-weight:bold; font-size:0.88em;
+            display:flex; justify-content:space-between; align-items:center;
+            border-bottom:1px solid var(--border);
+        }
+        .panel-content { padding:10px; overflow-y:auto; -webkit-overflow-scrolling:touch; }
 
-header h1 span { color: var(--accent); }
+        @media(min-width:769px){
+            .floating-panel { position:absolute; border-radius:8px; max-height:82vh; }
+            #sim-panel  { top:20px; left:20px; width:360px; }
+            #info-panel { top:20px; right:20px; width:270px; }
+        }
+        @media(max-width:768px){
+            #map-container { height:65%; top:0; }
+            .floating-panel {
+                position:fixed !important; bottom:0 !important; top:auto !important;
+                height:35vh !important; max-height:35vh !important;
+                border-radius:0; border:none; border-top:1px solid var(--border);
+            }
+            .panel-header { display:none; }
+            #info-panel { left:0 !important; width:35% !important; border-right:1px solid var(--border); z-index:101; }
+            #sim-panel  { right:0 !important; left:35% !important; width:65% !important; z-index:102; }
+            .panel-content { padding:5px; }
+            label { margin:2px 0; font-size:0.7em; }
+            input,select,.btn { padding:4px; font-size:0.78em; }
+            .row { gap:4px; }
+            .mode-switch label { padding:4px 3px; font-size:0.7em; }
+            th,td { padding:2px; font-size:0.7em; }
+            .status-grid { grid-template-columns:1fr; gap:4px; }
+        }
 
-.header-badge {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.68rem;
-  background: var(--bg4);
-  border: 1px solid var(--border2);
-  color: var(--text2);
-  padding: 3px 10px;
-  border-radius: 4px;
-  letter-spacing: 0.05em;
-}
+        /* ===== FORM ELEMENTS ===== */
+        label { display:block; margin:6px 0 3px; font-size:0.82em; font-weight:bold; color:var(--text2); }
+        input, select {
+            padding:7px 9px; width:100%; background:var(--bg3);
+            border:1px solid var(--border); border-radius:5px;
+            color:var(--text); font-size:0.88em;
+        }
+        input:focus, select:focus { outline:none; border-color:var(--accent); }
+        .row { display:flex; gap:8px; align-items:center; }
+        .col { flex:1; }
+        .btn {
+            padding:7px 12px; cursor:pointer; border-radius:5px; border:none;
+            font-weight:bold; width:100%; margin-top:5px; font-size:0.85em;
+            transition:opacity .15s;
+        }
+        .btn:hover { opacity:.85; }
+        .btn-primary { background:var(--accent2); color:#fff; }
+        .btn-blue    { background:var(--accent);  color:#fff; }
+        .btn-danger  { background:var(--danger);  color:#fff; }
+        .btn-warn    { background:var(--warn);     color:#fff; }
+        .btn-gray    { background:#3a4555;         color:var(--text); }
+        .btn:disabled { background:#2a3040; color:#556; cursor:not-allowed; opacity:1; }
 
-.header-status {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.72rem;
-  color: var(--text2);
-}
+        /* ===== STATUS ===== */
+        .status-grid {
+            background:var(--bg3); border-radius:5px; padding:8px 10px; margin-bottom:8px;
+            border-left:4px solid var(--danger); display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px;
+        }
+        .status-item { font-size:0.78em; color:var(--text2); min-width:0; }
+        .status-item span { display:block; font-weight:bold; color:var(--text); font-size:1.05em; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
-.status-dot {
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--text3);
-  transition: background 0.3s;
-}
-.status-dot.ok  { background: var(--green); box-shadow: 0 0 6px var(--green); }
-.status-dot.err { background: var(--red);   box-shadow: 0 0 6px var(--red); }
-.status-dot.loading { background: var(--amber); animation: pulse 1s infinite; }
+        /* ===== MODE SWITCH ===== */
+        .mode-switch { display:flex; gap:4px; margin-bottom:6px; }
+        .mode-switch label {
+            flex:1; text-align:center; padding:6px 3px;
+            background:var(--bg3); cursor:pointer; margin:0; border-radius:5px;
+            font-size:0.78em; border:1px solid var(--border); color:var(--text2);
+            transition:all .15s;
+        }
+        .mode-switch input[type="radio"] { display:none; }
+        .mode-switch label.active-atk { background:#3d1a1a; border-color:var(--danger); color:#f87171; font-weight:bold; }
+        .mode-switch label.active-ret { background:#1a2a3d; border-color:var(--accent); color:#7fb3f8; font-weight:bold; }
+        .mode-switch label.active-dep { background:#1a2d1a; border-color:var(--accent2); color:#6fcf97; font-weight:bold; }
 
-@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+        /* ===== TABLE ===== */
+        input.selecting { background:rgba(61,142,240,0.15); border-color:var(--accent); }
+        table { width:100%; border-collapse:collapse; margin-top:4px; font-size:0.82em; }
+        th { background:var(--bg3); text-align:left; padding:5px 6px; border-bottom:1px solid var(--border); color:var(--text2); font-size:0.8em; }
+        td { padding:5px 6px; border-bottom:1px solid var(--border); color:var(--text); }
 
-/* ── MAIN LAYOUT ── */
-.main {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-}
-
-/* ── MAP AREA ── */
-.map-area {
-  flex: 1;
-  position: relative;
-  overflow: hidden;
-  background: var(--bg);
-}
-
-#map-container {
-  width: 100%; height: 100%;
-}
-#map-container svg { width: 100%; height: 100%; }
-
-/* SVG path スタイル */
-#map-container path {
-  cursor: pointer;
-  transition: filter 0.15s, stroke-width 0.15s;
-  stroke: #2a3148;
-  stroke-width: 0.5px;
-}
-#map-container path:hover { filter: brightness(1.35); stroke: #fff; stroke-width: 1.5px; }
-#map-container path.selected {
-  stroke: #fff !important;
-  stroke-width: 2.5px !important;
-  filter: brightness(1.5) drop-shadow(0 0 6px rgba(255,255,255,0.5));
-}
-
-/* 凡例 */
-.map-legend {
-  position: absolute;
-  bottom: 16px; left: 16px;
-  background: rgba(13,15,20,0.85);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 14px;
-  font-size: 0.7rem;
-  color: var(--text2);
-  font-family: 'JetBrains Mono', monospace;
-  pointer-events: none;
-}
-.map-legend .leg-item { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
-.leg-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
-
-/* ── SIDE PANEL ── */
-.side-panel {
-  width: var(--panel-w);
-  background: var(--bg2);
-  border-left: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  flex-shrink: 0;
-}
-
-.panel-head {
-  padding: 16px 20px 12px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.panel-head h2 {
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  color: var(--text2);
-  text-transform: uppercase;
-}
-
-.panel-head .state-id-display {
-  margin-top: 6px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 1.2rem;
-  font-weight: 600;
-  color: var(--text);
-  min-height: 1.6em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.state-id-display.empty { color: var(--text3); font-size: 0.85rem; padding-top: 4px; }
-
-/* ── EDIT FORM ── */
-.edit-form {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.edit-form::-webkit-scrollbar { width: 4px; }
-.edit-form::-webkit-scrollbar-track { background: transparent; }
-.edit-form::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
-
-.field-group { display: flex; flex-direction: column; gap: 5px; }
-
-.field-label {
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  color: var(--text2);
-  text-transform: uppercase;
-}
-
-.field-input {
-  background: var(--bg3);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.9rem;
-  padding: 9px 12px;
-  width: 100%;
-  transition: border-color 0.2s, box-shadow 0.2s;
-  outline: none;
-}
-.field-input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(79,142,247,0.15);
-}
-.field-input:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-select.field-input {
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236b7a99' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  padding-right: 32px;
-}
-
-/* 施設ラジオ */
-.facility-row {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 6px;
-}
-
-.facility-btn {
-  position: relative;
-}
-.facility-btn input[type="radio"] {
-  position: absolute;
-  opacity: 0;
-  width: 0; height: 0;
-}
-.facility-btn label {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 9px 8px;
-  background: var(--bg3);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--text2);
-  transition: all 0.15s;
-  user-select: none;
-}
-.facility-btn input:checked + label {
-  background: var(--bg4);
-  border-color: var(--accent);
-  color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(79,142,247,0.3);
-}
-.facility-btn label:hover { border-color: var(--border2); color: var(--text); }
-
-.fac-dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-/* 変更プレビュー */
-.diff-strip {
-  background: var(--bg3);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 10px 12px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.72rem;
-  color: var(--text2);
-  display: none;
-  gap: 4px;
-  flex-direction: column;
-}
-.diff-strip.visible { display: flex; }
-.diff-row { display: flex; justify-content: space-between; align-items: center; }
-.diff-key { color: var(--text3); }
-.diff-val-before { color: var(--text3); text-decoration: line-through; }
-.diff-val-after  { color: var(--amber); font-weight: 600; }
-
-/* ── FOOTER BUTTONS ── */
-.panel-footer {
-  padding: 14px 20px;
-  border-top: 1px solid var(--border);
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.btn {
-  flex: 1;
-  padding: 10px;
-  border-radius: 7px;
-  border: 1px solid transparent;
-  font-family: 'Syne', sans-serif;
-  font-size: 0.82rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.15s;
-  letter-spacing: 0.04em;
-}
-
-.btn-save {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-.btn-save:hover { background: #3a7ee6; }
-.btn-save:disabled { opacity: 0.4; cursor: not-allowed; }
-
-.btn-reset {
-  background: transparent;
-  color: var(--text2);
-  border-color: var(--border2);
-}
-.btn-reset:hover { background: var(--bg4); color: var(--text); }
-.btn-reset:disabled { opacity: 0.4; cursor: not-allowed; }
-
-/* ── QUEUE LIST ── */
-.queue-section {
-  border-top: 1px solid var(--border);
-  padding: 14px 20px;
-  flex-shrink: 0;
-  max-height: 180px;
-  overflow-y: auto;
-}
-.queue-section h3 {
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  color: var(--text2);
-  text-transform: uppercase;
-  margin-bottom: 8px;
-}
-.queue-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 7px 0;
-  border-bottom: 1px solid var(--border);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.72rem;
-}
-.queue-item:last-child { border-bottom: none; }
-.queue-state { color: var(--text); font-weight: 600; }
-.queue-badges { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
-.badge {
-  padding: 2px 7px;
-  border-radius: 3px;
-  font-size: 0.65rem;
-  font-weight: 600;
-}
-.badge-owner  { background: rgba(79,142,247,0.15); color: var(--accent); border: 1px solid rgba(79,142,247,0.3); }
-.badge-mil    { background: rgba(239,68,68,0.12);  color: #f87171; border: 1px solid rgba(239,68,68,0.25); }
-.badge-dev    { background: rgba(34,197,94,0.12);  color: #4ade80; border: 1px solid rgba(34,197,94,0.25); }
-.badge-fac    { background: rgba(251,191,36,0.12); color: var(--gold); border: 1px solid rgba(251,191,36,0.25); }
-
-/* ── TOAST ── */
-.toast-wrap {
-  position: fixed;
-  bottom: 24px; left: 50%;
-  transform: translateX(-50%);
-  z-index: 9999;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  pointer-events: none;
-}
-.toast {
-  background: var(--bg4);
-  border: 1px solid var(--border2);
-  border-radius: 8px;
-  padding: 10px 18px;
-  font-size: 0.8rem;
-  color: var(--text);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
-  animation: toast-in 0.25s ease, toast-out 0.25s ease 2.5s forwards;
-  white-space: nowrap;
-}
-.toast.ok  { border-color: var(--green); color: var(--green); }
-.toast.err { border-color: var(--red);   color: #f87171; }
-
-@keyframes toast-in  { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
-@keyframes toast-out { from { opacity:1; } to { opacity:0; } }
-
-/* ── EMPTY STATE ── */
-.empty-hint {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-  gap: 10px;
-  color: var(--text3);
-  font-size: 0.82rem;
-  text-align: center;
-  padding: 20px;
-}
-.empty-hint .arrow { font-size: 2rem; opacity: 0.3; }
-
-/* ── LOADING OVERLAY ── */
-.loading-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(13,15,20,0.7);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 20;
-  gap: 12px;
-  font-size: 0.85rem;
-  color: var(--text2);
-  font-family: 'JetBrains Mono', monospace;
-}
-.loading-overlay.hidden { display: none; }
-
-.spinner {
-  width: 18px; height: 18px;
-  border: 2px solid var(--border2);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-</style>
+        /* ===== MISC ===== */
+        .war-tag { color:#fff; background:var(--danger); padding:2px 6px; border-radius:4px; font-size:0.75em; margin-right:3px; }
+        .queue-list {
+            font-size:0.75em; color:var(--text2); background:rgba(241,196,15,0.06);
+            padding:5px 7px; border:1px solid rgba(241,196,15,0.25);
+            margin-bottom:5px; max-height:60px; overflow-y:auto; border-radius:4px;
+        }
+        .supply-bar { display:inline-block; height:6px; border-radius:3px; vertical-align:middle; margin-left:4px; }
+        #powerAlert { color:var(--warn); font-size:0.75em; display:none; margin-top:3px; }
+        .section-sep { border:none; border-top:1px solid var(--border); margin:8px 0; }
+    </style>
 </head>
 <body>
 
-<header>
-  <h1>STATE <span>EDITOR</span></h1>
-  <div class="header-badge">ADMIN</div>
-  <div class="header-status">
-    <div class="status-dot" id="statusDot"></div>
-    <span id="statusText">接続中…</span>
-  </div>
-</header>
-
-<div class="main">
-
-  <!-- MAP -->
-  <div class="map-area">
-    <div id="map-container"></div>
-    <div class="loading-overlay" id="loadingOverlay">
-      <div class="spinner"></div>
-      データ読み込み中…
+<!-- LOGIN -->
+<div id="login-overlay">
+    <div class="login-box">
+        <h2>⚔️ 司令部ログイン</h2>
+        <input type="text" id="loginCountry" placeholder="国名 (例: A国)" value="A国">
+        <input type="password" id="loginPassword" placeholder="パスワード" style="margin-top:10px;">
+        <button class="btn btn-primary" style="margin-top:14px;" onclick="handleLogin()">作戦開始</button>
     </div>
-    <div class="map-legend" id="mapLegend" style="display:none;">
-      <div style="font-weight:700;font-size:0.72rem;color:var(--text);margin-bottom:4px;">クリックで選択</div>
-      <div class="leg-item"><div class="leg-dot" style="background:#f1c40f;"></div> 首都</div>
-      <div class="leg-item"><div class="leg-dot" style="background:#3498db;"></div> 港</div>
-      <div class="leg-item"><div class="leg-dot" style="background:#2ecc71;"></div> 基地</div>
-    </div>
-  </div>
-
-  <!-- SIDE PANEL -->
-  <div class="side-panel">
-    <div class="panel-head">
-      <h2>ステート編集</h2>
-      <div class="state-id-display empty" id="stateIdDisplay">← 地図をクリックして選択</div>
-    </div>
-
-    <!-- EMPTY -->
-    <div class="empty-hint" id="emptyHint">
-      <div class="arrow">←</div>
-      地図上のステートをクリックして<br>データを編集してください
-    </div>
-
-    <!-- FORM -->
-    <div class="edit-form" id="editForm" style="display:none;">
-
-      <div class="field-group">
-        <div class="field-label">所有国</div>
-        <select class="field-input" id="fOwner"></select>
-      </div>
-
-      <div class="field-group">
-        <div class="field-label">軍事力</div>
-        <input type="number" class="field-input" id="fMilitary" min="0" step="1" placeholder="0">
-      </div>
-
-      <div class="field-group">
-        <div class="field-label">施設（首都プラグ）</div>
-        <div class="facility-row">
-          <div class="facility-btn">
-            <input type="radio" name="fFacility" id="fac-none" value="">
-            <label for="fac-none"><div class="fac-dot" style="background:#3d4a65;"></div>なし</label>
-          </div>
-          <div class="facility-btn">
-            <input type="radio" name="fFacility" id="fac-capital" value="首都">
-            <label for="fac-capital"><div class="fac-dot" style="background:#f1c40f;"></div>首都</label>
-          </div>
-          <div class="facility-btn">
-            <input type="radio" name="fFacility" id="fac-port" value="港">
-            <label for="fac-port"><div class="fac-dot" style="background:#3498db;"></div>港</label>
-          </div>
-          <div class="facility-btn">
-            <input type="radio" name="fFacility" id="fac-base" value="基地">
-            <label for="fac-base"><div class="fac-dot" style="background:#2ecc71;"></div>基地</label>
-          </div>
-        </div>
-      </div>
-
-      <!-- 差分プレビュー -->
-      <div class="diff-strip" id="diffStrip"></div>
-
-    </div>
-
-    <!-- FOOTER -->
-    <div class="panel-footer" id="panelFooter" style="display:none;">
-      <button class="btn btn-reset" id="btnReset" disabled>リセット</button>
-      <button class="btn btn-save"  id="btnSave"  disabled>保存</button>
-    </div>
-
-    <!-- 変更キュー -->
-    <div class="queue-section" id="queueSection" style="display:none;">
-      <h3>未保存の変更 <span id="queueCount" style="color:var(--amber);"></span></h3>
-      <div id="queueList"></div>
-    </div>
-  </div>
 </div>
 
-<div class="toast-wrap" id="toastWrap"></div>
+<!-- TABS -->
+<div id="tab-controls"><div class="control-bar" id="tab-container"></div></div>
+
+<!-- MAP -->
+<div id="map-container"></div>
+
+<!-- INFO PANEL -->
+<div id="info-panel" class="floating-panel">
+    <div id="info-header" class="panel-header"><span>ℹ️ 領土情報</span></div>
+    <div id="infoBox" class="panel-content"><p style="color:var(--text2);text-align:center;margin-top:20px;">MAPをクリック</p></div>
+</div>
+
+<!-- SIM PANEL -->
+<div id="sim-panel" class="floating-panel">
+    <div id="sim-header" class="panel-header">
+        <span>⚔️ 司令部 — <span id="playerDisplay">未</span></span>
+    </div>
+    <div id="sim-panel-content" class="panel-content">
+
+        <div class="status-grid">
+            <div class="status-item">国家軍事力<span id="statMilitary">-</span></div>
+            <div class="status-item">軍事技術力<span id="statTech">-</span></div>
+            <div class="status-item">充足率<span id="statFulfillment">-</span></div>
+        </div>
+
+        <div class="mode-switch">
+            <label id="lblAttack" class="active-atk">
+                <input type="radio" name="missionMode" value="ATTACK" checked onchange="switchMode()">⚔️ 侵攻
+            </label>
+            <label id="lblRetreat">
+                <input type="radio" name="missionMode" value="RETREAT" onchange="switchMode()">🏳️ 撤退
+            </label>
+            <label id="lblDeploy">
+                <input type="radio" name="missionMode" value="DEPLOY" onchange="switchMode()">🪖 配置
+            </label>
+        </div>
+
+        <div id="attackForm">
+            <div class="row">
+                <div class="col"><input id="fromInput" type="text" placeholder="From" readonly></div>
+                <span id="arrowLabel" style="font-size:1.1em;">⚔️</span>
+                <div class="col"><input id="toInput" type="text" placeholder="To" readonly></div>
+            </div>
+            <div class="row" style="margin-top:5px;">
+                <div class="col" style="flex:1.5;">
+                    <input id="attackPower" type="number" min="1" value="100" placeholder="兵数">
+                </div>
+                <div class="col" style="flex:1;">
+                    <button id="addOrderBtn" class="btn btn-primary" style="margin:0;">追加</button>
+                </div>
+            </div>
+            <div id="powerAlert"></div>
+        </div>
+
+        <div id="ordersSection">
+            <hr class="section-sep">
+            <label>送信済み命令</label>
+            <div id="serverQueueList" class="queue-list">なし</div>
+
+            <label>新規命令（未送信）</label>
+            <div style="max-height:80px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;">
+                <table id="orderTable"><tbody></tbody></table>
+            </div>
+
+            <button id="sendBtn" class="btn btn-blue" style="margin-top:7px;">📤 命令送信</button>
+        </div>
+
+        <div id="militaryUpdateArea" style="display:none;margin-top:8px;">
+            <hr class="section-sep">
+            <label style="color:var(--warn);">🪖 配置変更（未保存）</label>
+            <div id="deployPreviewText" style="font-size:0.76em;color:var(--text2);margin-bottom:5px;">なし</div>
+            <button id="btnUpdateMilitary" class="btn btn-warn">配置を適用</button>
+            <button id="btnClearMilitary" class="btn btn-gray" style="margin-top:3px;">配置変更をクリア</button>
+        </div>
+
+        <hr class="section-sep">
+        <div class="row">
+            <select id="targetCountrySelect"><option value="">国選択</option></select>
+            <button class="btn btn-danger" style="margin:0;padding:5px 9px;width:auto;" onclick="declareWar()">布告</button>
+        </div>
+        <div style="font-size:0.74em;color:var(--text2);margin-top:3px;">敵: <span id="warListDisplay">なし</span></div>
+
+    </div>
+</div>
 
 <script>
 // =========================================================
-// CONFIG — 本番URLに合わせる
+// CONFIG
 // =========================================================
 const API_URL  = "https://flat-waterfall-6b98.zilcon211006.workers.dev/";
 const SVG_FILE = "Statemap.svg";
 
-// =========================================================
-// STATE
-// =========================================================
-let mapHeaders    = [];
-let mapData       = [];
-let countryDataList = [];
-let adjacency     = {};
+let currentPlayer = "";
+let mapHeaders = [], mapData = [], adjacency = {};
+let countryDataList = [], warData = [], serverQueueData = [];
+let orders = [];
+let pendingGarrisons = {};
+let isClickLocked = false;
+let currentTab = "国";
+let inputTargetMode = null;
+let panZoomInstance = null;
+let touchStartX = 0, touchStartY = 0;
+const DRAG_THRESHOLD = 10;
+let cachedSupplyMap = null;
+let cachedDeployableStates = null;
+let cachedDeployablePlayer = null;
+let handOverride = null;
 
-let selectedStateId  = null;
-let originalSnapshot = null; // 選択時のスナップショット
-let pendingChanges   = {};   // { stateId: { owner, military, facility } }
-let panZoomInstance  = null;
-
-// =========================================================
-// BOOT
-// =========================================================
-window.addEventListener('DOMContentLoaded', () => {
-  loadSVG().then(() => loadData());
-  document.getElementById('btnSave').addEventListener('click', saveSelected);
-  document.getElementById('btnReset').addEventListener('click', resetSelected);
-
-  // フォーム変更監視
-  ['fOwner','fMilitary'].forEach(id => {
-    document.getElementById(id).addEventListener('input', onFormChange);
-  });
-  document.querySelectorAll('input[name="fFacility"]').forEach(r => {
-    r.addEventListener('change', onFormChange);
-  });
-});
+// 送信後にローカルで差し引く手札軍事力（UI反映用）
+let localCommittedHand = 0; // 送信済み配置命令の累計
 
 // =========================================================
-// SVG LOAD
+// ヘルパー: 列インデックス取得
 // =========================================================
-function loadSVG() {
-  return fetch(SVG_FILE)
-    .then(r => { if (!r.ok) throw new Error('SVG not found'); return r.text(); })
-    .then(svg => {
-      const c = document.getElementById('map-container');
-      c.innerHTML = svg;
-      const el = c.querySelector('svg');
-      if (el) {
-        el.style.width = '100%'; el.style.height = '100%';
-        el.removeAttribute('width'); el.removeAttribute('height');
-      }
-      panZoomInstance = svgPanZoom(el, {
-        zoomEnabled: true, panEnabled: true,
-        controlIconsEnabled: false, dblClickZoomEnabled: false,
-        minZoom: 0.3, maxZoom: 12
-      });
-      c.addEventListener('click', onMapClick);
-    })
-    .catch(() => {
-      // SVGなし時はダミー表示
-      document.getElementById('map-container').innerHTML =
-        `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text3);font-family:'JetBrains Mono',monospace;font-size:0.8rem;flex-direction:column;gap:12px;">
-          <div style="font-size:2rem;opacity:0.2;">🗺</div>
-          Statemap.svg が見つかりません<br>
-          <span style="color:var(--text3);font-size:0.7rem;">同ディレクトリに配置してください</span>
-         </div>`;
+function colIdx(name) { return mapHeaders.indexOf(name); }
+function ownerIdx()   { return colIdx('国') !== -1 ? colIdx('国') : colIdx('所有国'); }
+function flagIdx()    { return mapHeaders.findIndex(h => ['首都プラグ','首都フラグ','フラグ'].includes(h)); }
+function devIdx()     { return 3; } // D列 = index 3
+
+function getFlag(row)  { const i=flagIdx();  return i>=0 ? String(row[i]||'') : ''; }
+function getOwner(row) { const i=ownerIdx(); return i>=0 ? row[i] : ''; }
+function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+function invalidateDerivedCaches() {
+    cachedSupplyMap = null;
+    cachedDeployableStates = null;
+    cachedDeployablePlayer = null;
+}
+
+function getPendingDeployTotal() {
+    const milI = colIdx('軍事力');
+    if (milI < 0) return 0;
+    let total = 0;
+    Object.entries(pendingGarrisons).forEach(([stateId, newValue]) => {
+        const row = mapData.find(r => r[0] === stateId);
+        const oldValue = row ? (parseInt(row[milI]) || 0) : 0;
+        total += Math.max(0, (parseInt(newValue) || 0) - oldValue);
     });
+    return total;
+}
+
+function getStateMilitaryPreview(includeLocalOrders = true) {
+    const milI = colIdx('軍事力');
+    const preview = {};
+    if (milI < 0) return preview;
+
+    mapData.forEach(r => { preview[r[0]] = parseInt(r[milI]) || 0; });
+    Object.entries(pendingGarrisons).forEach(([stateId, value]) => {
+        preview[stateId] = Math.max(0, parseInt(value) || 0);
+    });
+
+    const queueOrders = serverQueueData
+        .filter(r => r[1] === currentPlayer)
+        .map(r => ({ mission: r[6], from: r[2], to: r[3], power: parseInt(r[4]) || 0 }));
+    const localOrders = includeLocalOrders ? orders.map(o => ({ ...o, power: parseInt(o.power) || 0 })) : [];
+
+    [...queueOrders, ...localOrders].forEach(o => {
+        if (!o.from || preview[o.from] === undefined) return;
+
+        if (o.mission === '攻撃') {
+            preview[o.from] = Math.max(0, (preview[o.from] || 0) - Math.max(0, o.power || 0));
+            return;
+        }
+
+        if (o.mission === '撤退') {
+            const movable = o.power > 0 ? Math.min(preview[o.from] || 0, o.power) : (preview[o.from] || 0);
+            preview[o.from] = Math.max(0, (preview[o.from] || 0) - movable);
+            if (o.to && o.to !== o.from && preview[o.to] !== undefined) preview[o.to] = (preview[o.to] || 0) + movable;
+        }
+    });
+
+    return preview;
+}
+
+function getStateAvailableMilitary(stateId) {
+    const preview = getStateMilitaryPreview(true);
+    return preview[stateId] || 0;
+}
+
+function getAvailableHandMilitary() {
+    const hand = getCurrentHandMilitary(currentPlayer);
+    return Math.max(0, hand - localCommittedHand - getPendingDeployTotal());
+}
+
+function getGradientColorBy100(value) {
+    const num = parseFloat(value);
+    if (!num || num <= 0) return '#1e2330';
+    const t = clamp(num, 1, 100) / 100;
+    const rr = Math.round(200 - (90 * t));
+    const gg = Math.round(55 + (165 * t));
+    const bb = Math.round(48 + (70 * t));
+    return `rgb(${rr},${gg},${bb})`;
+}
+
+function getFlagVisual(flag) {
+    const val = String(flag || '').trim();
+    if (val === '首都' || val === 'TRUE') return { label: '首都', color: '#f1c40f', short: '首', stroke: '#fff1a8' };
+    if (val === '港') return { label: '港', color: '#3498db', short: '港', stroke: '#c7e8ff' };
+    if (val === '航路') return { label: '航路', color: '#00d2ff', short: '航', stroke: '#9ef6ff' };
+    return { label: val || 'なし', color: '#556070', short: '', stroke: '#556070' };
+}
+
+function getCountryRow(countryName = currentPlayer) {
+    return countryDataList.find(r => r[0] === countryName) || null;
+}
+
+function normalizeHexColor(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const normalized = raw.startsWith('#') ? raw : `#${raw}`;
+    return /^#[0-9a-fA-F]{6}$/.test(normalized) ? normalized : '';
+}
+
+function getCountryColor(countryName, fallback = '#2a2e3a') {
+    const row = getCountryRow(countryName);
+    return normalizeHexColor(row && row[4]) || fallback;
+}
+
+function getCountryTech(countryName = currentPlayer) {
+    const row = getCountryRow(countryName);
+    return row ? row[5] : '';
+}
+
+function getCountryFulfillment(countryName = currentPlayer) {
+    const row = getCountryRow(countryName);
+    return row ? row[6] : '';
+}
+
+function getCurrentHandMilitary(countryName = currentPlayer) {
+    const row = getCountryRow(countryName);
+    const base = row ? (parseInt(row[1]) || 0) : 0;
+    if (countryName === currentPlayer && handOverride !== null && !Number.isNaN(handOverride)) return handOverride;
+    return base;
+}
+
+function buildCountryStateBundle(country) {
+    const oi = ownerIdx();
+    const myRows = mapData.filter(r => oi >= 0 && r[oi] === country);
+    const myStates = myRows.map(r => r[0]);
+    return {
+        myRows,
+        myStates,
+        myStateSet: new Set(myStates),
+        capitals: myRows.filter(r => getFlag(r) === '首都').map(r => r[0]),
+        ports: myRows.filter(r => getFlag(r) === '港').map(r => r[0]),
+    };
+}
+
+function bfsWithinOwnStates(seedIds, allowedSet, bestFactory) {
+    const best = {};
+    const queue = [];
+    seedIds.forEach(id => {
+        if (!allowedSet.has(id) || best[id]) return;
+        best[id] = bestFactory();
+        queue.push(id);
+    });
+    let head = 0;
+    while (head < queue.length) {
+        const cur = queue[head++];
+        const curInfo = best[cur];
+        (adjacency[cur] || []).forEach(nb => {
+            if (!allowedSet.has(nb)) return;
+            const cand = curInfo.next(nb);
+            if (!best[nb] || cand.betterThan(best[nb])) {
+                best[nb] = cand;
+                queue.push(nb);
+            }
+        });
+    }
+    return best;
+}
+
+function getAutoSeaPortSet(country) {
+    // 補給ネットワーク用: 港2つ以上が条件（変更なし）
+    const bundle = buildCountryStateBundle(country);
+    if (bundle.capitals.length === 0 || bundle.ports.length < 2) return new Set();
+
+    const reachable = new Set(bundle.capitals);
+    const queue = [...bundle.capitals];
+    let head = 0;
+    while (head < queue.length) {
+        const cur = queue[head++];
+        (adjacency[cur] || []).forEach(nb => {
+            if (!bundle.myStateSet.has(nb) || reachable.has(nb)) return;
+            reachable.add(nb);
+            queue.push(nb);
+        });
+    }
+
+    const capitalConnectedPortExists = bundle.ports.some(id => reachable.has(id));
+    return capitalConnectedPortExists ? new Set(bundle.ports) : new Set();
+}
+
+function getOverlayScale() {
+    const zoom = panZoomInstance ? panZoomInstance.getZoom() : 1;
+    return clamp(1 / Math.pow(Math.max(zoom, 1), 0.16), 0.82, 1.42);
+}
+
+function syncPendingStateUI() {
+    const area = document.getElementById('militaryUpdateArea');
+    const txt = document.getElementById('deployPreviewText');
+    if (!area || !txt) return;
+    const entries = Object.entries(pendingGarrisons);
+    if (entries.length === 0) {
+        area.style.display = 'none';
+        txt.textContent = 'なし';
+        return;
+    }
+    area.style.display = 'block';
+    const list = entries.map(([stateId, value]) => `${stateId}: ${value}`).join(' / ');
+    txt.textContent = `変更中 ${entries.length}件 ｜ 手札消費予定 ${getPendingDeployTotal()} ｜ ${list}`;
+}
+
+function clearPendingDeployments() {
+    pendingGarrisons = {};
+    syncPendingStateUI();
+    updateCountryStatsUI();
+    renderMap();
+}
+
+function applyDeployToState(stateId, addPower) {
+    const preview = getStateMilitaryPreview(false);
+    const current = preview[stateId] || 0;
+    pendingGarrisons[stateId] = current + addPower;
+    syncPendingStateUI();
+    updateCountryStatsUI();
+    renderMap();
+    showInfo(stateId);
+}
+
+// =========================================================
+// LOGIN & SVG LOAD
+// =========================================================
+async function handleLogin() {
+    const country = document.getElementById('loginCountry').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    if (!country) return alert("国名を入力してください");
+    if (!password) return alert("パスワードを入力してください");
+
+    try {
+        const res = await fetch(API_URL);
+        const data = await res.json();
+        countryDataList = data.CountryData ? data.CountryData.slice(1) : [];
+        const row = countryDataList.find(r => r[0] === country);
+        if (!row) return alert("その国は存在しません");
+        const expectedPassword = String(row[2] || '');
+        if (String(password) !== expectedPassword) return alert("パスワードが違います");
+
+        currentPlayer = country;
+        document.getElementById('playerDisplay').textContent = currentPlayer;
+        document.getElementById('login-overlay').style.display = 'none';
+        loadSVG().then(() => { loadGameData(); initUI(); switchMode(); });
+    } catch (err) {
+        console.error(err);
+        alert("ログイン情報の確認に失敗しました");
+    }
+}
+
+function loadSVG() {
+    return fetch(SVG_FILE)
+        .then(r => { if (!r.ok) throw new Error('SVG load failed'); return r.text(); })
+        .then(svgText => {
+            const container = document.getElementById('map-container');
+            const wrapper = document.createElement('div');
+            wrapper.id = 'wrapper';
+            wrapper.style.cssText = 'width:100%;height:100%;';
+            wrapper.innerHTML = svgText;
+            const svg = wrapper.querySelector('svg');
+            if (svg) {
+                svg.style.width = '100%'; svg.style.height = '100%';
+                svg.removeAttribute('width'); svg.removeAttribute('height');
+            }
+            container.appendChild(wrapper);
+        })
+        .catch(err => {
+            console.error('SVG load error:', err);
+            const container = document.getElementById('map-container');
+            const wrapper = document.createElement('div');
+            wrapper.id = 'wrapper';
+            wrapper.style.cssText = 'width:100%;height:100%;';
+            wrapper.innerHTML = `<svg width="100%" height="100%" style="background:#12151a"><text x="50%" y="50%" text-anchor="middle" fill="#c0392b" font-size="16">Statemap.SVG を読み込めませんでした</text></svg>`;
+            container.appendChild(wrapper);
+        });
 }
 
 // =========================================================
 // DATA LOAD
 // =========================================================
-function loadData() {
-  setStatus('loading', '読み込み中…');
-  fetch(API_URL)
+function loadGameData() {
+    fetch(API_URL)
     .then(r => r.json())
     .then(data => {
-      if (data.MapData) {
-        mapHeaders = data.MapData[0];
-        mapData    = data.MapData.slice(1);
-      }
-      if (data.CountryData) {
-        countryDataList = data.CountryData.slice(1);
-      }
-      if (data.AdjacencyData) {
-        adjacency = {};
-        data.AdjacencyData.slice(1).forEach(r => { adjacency[r[0]] = r.slice(1).filter(n => n); });
-      }
-      colorizeMap();
-      buildOwnerSelect();
-      document.getElementById('loadingOverlay').classList.add('hidden');
-      document.getElementById('mapLegend').style.display = '';
-      setStatus('ok', `${mapData.length} ステート読込済`);
+        if (data.MapData) {
+            mapHeaders = data.MapData[0];
+            mapData    = data.MapData.slice(1);
+            invalidateDerivedCaches();
+            setupTabs();
+            renderMap();
+        }
+        if (data.CountryData) {
+            countryDataList = data.CountryData.slice(1);
+            // handOverride がサーバー値と一致していればクリア（初代のロジックを保持）
+            const loadedRow  = getCountryRow(currentPlayer);
+            const loadedHand = loadedRow ? (parseInt(loadedRow[1]) || 0) : null;
+            if (handOverride !== null && loadedHand === handOverride) handOverride = null;
+            localCommittedHand = 0;
+            pendingGarrisons   = {};
+            updateCountryStatsUI();
+            syncPendingStateUI();
+            setupDiplomacyUI();
+        }
+        if (data.AdjacencyData) { processAdjacency(data.AdjacencyData); }
+        if (data.WarData)       { warData = data.WarData.slice(1); updateWarListUI(); }
+        if (data.QueueData)     { serverQueueData = data.QueueData.slice(1); renderServerQueue(); renderMap(); }
     })
     .catch(err => {
-      console.error(err);
-      document.getElementById('loadingOverlay').classList.add('hidden');
-      setStatus('err', '接続失敗');
-      toast('データ取得に失敗しました', 'err');
+        console.error(err);
+        alert("データの取得に失敗しました。通信状況を確認してください。");
     });
 }
 
-// =========================================================
-// HELPER: 列インデックス
-// =========================================================
-function ownerIdx()    { return mapHeaders.findIndex(h => h === '国' || h === '所有国'); }
-function milIdx()      { return mapHeaders.findIndex(h => h === '軍事力'); }
-function flagIdx()     { return mapHeaders.findIndex(h => ['首都プラグ','首都フラグ','フラグ'].includes(h)); }
-
-function getRowById(id)  { return mapData.find(r => r[0] === id) || null; }
-function getOwner(row)   { const i = ownerIdx(); return i >= 0 ? String(row[i] || '') : ''; }
-function getMilitary(row){ const i = milIdx();   return i >= 0 ? (parseFloat(row[i]) || 0) : 0; }
-function getFacility(row){ const i = flagIdx();  return i >= 0 ? String(row[i] || '') : ''; }
-function getCountryColor(name) {
-  const r = countryDataList.find(r => r[0] === name);
-  return (r && r[4]) ? r[4] : '#3a4050';
+function processAdjacency(raw) {
+    adjacency = {};
+    raw.slice(1).forEach(r => adjacency[r[0]] = r.slice(1).filter(n => n));
+    invalidateDerivedCaches();
 }
 
 // =========================================================
-// MAP COLORING
+// 国家軍事力 残量
 // =========================================================
-function colorizeMap() {
-  mapData.forEach(row => {
-    const el = document.getElementById(row[0]);
-    if (!el) return;
-    const owner = getOwner(row);
-    const color = getCountryColor(owner);
-    el.style.fill = color;
+function updateCountryStatsUI() {
+    const myData = getCountryRow(currentPlayer);
+    if (!myData) return;
+    const hand = getCurrentHandMilitary(currentPlayer);
+    const remaining = Math.max(0, hand - localCommittedHand - getPendingDeployTotal());
+    const militaryEl = document.getElementById('statMilitary');
+    const techEl = document.getElementById('statTech');
+    const fulfillmentEl = document.getElementById('statFulfillment');
 
-    // 施設ハイライト: ストロークで示す
-    const fac = getFacility(row);
-    if (fac === '首都') {
-      el.style.stroke = '#f1c40f'; el.style.strokeWidth = '1.5px';
-    } else if (fac === '港') {
-      el.style.stroke = '#3498db'; el.style.strokeWidth = '1.5px';
-    } else if (fac === '基地') {
-      el.style.stroke = '#2ecc71'; el.style.strokeWidth = '1.5px';
+    militaryEl.textContent = `残り：${remaining.toLocaleString()}`;
+    militaryEl.style.color = remaining <= 0 ? '#f87171' : remaining <= Math.max(10, hand * 0.15) ? '#f6b93b' : 'var(--text)';
+    if (techEl) techEl.textContent = `${getCountryTech(currentPlayer) || 0}`;
+    if (fulfillmentEl) fulfillmentEl.textContent = `${getCountryFulfillment(currentPlayer) || 0}`;
+
+    document.body.dataset.totalMilitary = hand;
+    document.body.dataset.availableMilitary = remaining;
+}
+
+// =========================================================
+// 補給度計算
+// 「ステート距離的最短ルート」のうち、開発度合計が最大の経路を採用
+// =========================================================
+function calcSupply() {
+    if (cachedSupplyMap) return cachedSupplyMap;
+
+    const oi = ownerIdx(), di = devIdx();
+    if (oi < 0) return {};
+    const rowById = Object.fromEntries(mapData.map(r => [r[0], r]));
+    const supplyMap = {};
+    const countries = [...new Set(mapData.map(r => r[oi]).filter(Boolean))];
+
+    const makeNode = (dist, dev, base) => ({
+        dist, dev, base,
+        next(nb) {
+            const row = rowById[nb];
+            return makeNode(this.dist + 1, this.dev + (row ? (parseFloat(row[di]) || 0) : 0), base);
+        },
+        betterThan(prev) {
+            if (this.dist !== prev.dist) return this.dist < prev.dist;
+            if (this.dev !== prev.dev) return this.dev > prev.dev;
+            return this.base > prev.base;
+        }
+    });
+
+    countries.forEach(country => {
+        const bundle = buildCountryStateBundle(country);
+        const landBest = bfsWithinOwnStates(bundle.capitals, bundle.myStateSet, () => makeNode(0, 0, 100));
+        const autoSeaPorts = [...getAutoSeaPortSet(country)];
+        const seaBest = bfsWithinOwnStates(autoSeaPorts, bundle.myStateSet, () => makeNode(0, 0, 40));
+
+        bundle.myStates.forEach(stateId => {
+            const land = landBest[stateId] || null;
+            const sea = seaBest[stateId] || null;
+            let chosen = null;
+            if (land && sea) chosen = land.betterThan(sea) ? land : sea.betterThan(land) ? sea : land;
+            else chosen = land || sea;
+            supplyMap[stateId] = chosen ? Math.max(0, Math.round(chosen.base - (5 * chosen.dist) + chosen.dev)) : 0;
+        });
+    });
+
+    cachedSupplyMap = supplyMap;
+    return supplyMap;
+}
+
+// =========================================================
+// 配置可能ステート計算
+// 条件: 首都から自国BFS到達 OR 自動港湾ネットワーク港から自国BFS到達
+// =========================================================
+function getDeployableStates() {
+    if (cachedDeployableStates && cachedDeployablePlayer === currentPlayer) return cachedDeployableStates;
+
+    const bundle = buildCountryStateBundle(currentPlayer);
+    const reachable = new Set();
+    const queue = [];
+    const seeds = [...new Set([...bundle.capitals, ...getAutoSeaPortSet(currentPlayer)])];
+
+    seeds.forEach(id => {
+        if (!bundle.myStateSet.has(id) || reachable.has(id)) return;
+        reachable.add(id);
+        queue.push(id);
+    });
+
+    let head = 0;
+    while (head < queue.length) {
+        const cur = queue[head++];
+        (adjacency[cur] || []).forEach(nb => {
+            if (!bundle.myStateSet.has(nb) || reachable.has(nb)) return;
+            reachable.add(nb);
+            queue.push(nb);
+        });
+    }
+
+    cachedDeployableStates = reachable;
+    cachedDeployablePlayer = currentPlayer;
+    return reachable;
+}
+
+// =========================================================
+// 港ステートのセット（自国）
+// =========================================================
+function getMyPortStates() {
+    const fi = flagIdx(), oi = ownerIdx();
+    if (fi < 0 || oi < 0) return new Set();
+    return new Set(mapData.filter(r => r[oi]===currentPlayer && getFlag(r)==='港').map(r=>r[0]));
+}
+
+// =========================================================
+// サーバーキュー表示 + F列補給度書き込み
+// =========================================================
+function renderServerQueue() {
+    const div = document.getElementById('serverQueueList');
+    const myOrders = serverQueueData.filter(r => r[1] === currentPlayer);
+    if (myOrders.length === 0) {
+        div.textContent = "なし";
     } else {
-      el.style.stroke = ''; el.style.strokeWidth = '';
+        let html = '<ul style="padding-left:15px;margin:0;">';
+        myOrders.forEach(o => {
+            const mission=o[6], from=o[2], to=o[3], power=o[4];
+            const toStr = mission==='撤退' ? (to&&to!==from?`➡ ${to}`:'(放棄)') : mission==='配置' ? '-' : `➡ ${to}`;
+            const pwStr = mission==='撤退' ? (power>0?`(兵${power})`:'(全員)') : `(兵${power})`;
+            html += `<li>${mission}: ${from} ${toStr} ${pwStr}</li>`;
+        });
+        html += '</ul>';
+        div.innerHTML = html;
     }
-  });
+    writeSupplyToQueue();
+    renderArrows();
+}
 
-  // pendingChanges の色を上書き
-  Object.entries(pendingChanges).forEach(([sid, ch]) => {
-    const el = document.getElementById(sid);
-    if (!el) return;
-    el.style.fill = getCountryColor(ch.owner);
-  });
+function writeSupplyToQueue() {
+    const supplyMap = calcSupply();
+    const updates = serverQueueData
+        .filter(r => r[1]===currentPlayer)
+        .map(r => {
+            const supply = r[5] === 'SEA' ? 50 : supplyMap[r[2]];
+            return { queueId:r[0], stateId:r[2], supply };
+        })
+        .filter(r => r.supply !== undefined);
+    if (updates.length === 0) return;
+    fetch(API_URL, {
+        method:'POST',
+        body: JSON.stringify({ action:"UPDATE_QUEUE_SUPPLY", country:currentPlayer, updates })
+    }).catch(()=>{});
 }
 
 // =========================================================
-// OWNER SELECT
+// UI 初期化
 // =========================================================
-function buildOwnerSelect() {
-  const sel = document.getElementById('fOwner');
-  const countries = [...new Set(countryDataList.map(r => r[0]).filter(Boolean))].sort();
-  sel.innerHTML = countries.map(c => `<option value="${c}">${c}</option>`).join('');
-}
+function initUI() {
+    document.getElementById('fromInput').onclick = () => setInputMode('from');
+    document.getElementById('toInput').onclick   = () => {
+        const m = document.querySelector('input[name="missionMode"]:checked').value;
+        if (m !== 'DEPLOY') setInputMode('to');
+    };
+    document.getElementById('addOrderBtn').onclick = addOrder;
+    document.getElementById('sendBtn').onclick = sendOrders;
+    document.getElementById('btnUpdateMilitary').onclick = sendMilitaryUpdates;
+    document.getElementById('btnClearMilitary').onclick = clearPendingDeployments;
+    syncPendingStateUI();
 
-// =========================================================
-// MAP CLICK
-// =========================================================
-function onMapClick(e) {
-  const path = e.target.closest('path');
-  if (!path) return;
-  selectState(path.id);
-}
-
-function selectState(id) {
-  const row = getRowById(id);
-  if (!row) return;
-
-  // 前の選択解除
-  if (selectedStateId) {
-    const prev = document.getElementById(selectedStateId);
-    if (prev) prev.classList.remove('selected');
-  }
-
-  selectedStateId = id;
-  const el = document.getElementById(id);
-  if (el) el.classList.add('selected');
-
-  // pending があればそちらを優先
-  const ch = pendingChanges[id];
-  originalSnapshot = {
-    owner:    getOwner(row),
-    military: getMilitary(row),
-    facility: getFacility(row)
-  };
-
-  const display = ch || originalSnapshot;
-  fillForm(id, display);
-  updateDiff();
-}
-
-// =========================================================
-// FORM FILL
-// =========================================================
-function fillForm(id, data) {
-  document.getElementById('stateIdDisplay').textContent = id;
-  document.getElementById('stateIdDisplay').classList.remove('empty');
-
-  document.getElementById('emptyHint').style.display  = 'none';
-  document.getElementById('editForm').style.display   = 'flex';
-  document.getElementById('panelFooter').style.display = 'flex';
-
-  document.getElementById('fOwner').value    = data.owner;
-  document.getElementById('fMilitary').value = data.military;
-
-  const fac = data.facility || '';
-  const radio = document.querySelector(`input[name="fFacility"][value="${fac}"]`);
-  if (radio) radio.checked = true;
-  else document.getElementById('fac-none').checked = true;
-
-  updateButtons();
-}
-
-// =========================================================
-// FORM CHANGE
-// =========================================================
-function onFormChange() {
-  updateDiff();
-  updateButtons();
-}
-
-function currentFormValues() {
-  return {
-    owner:    document.getElementById('fOwner').value,
-    military: parseFloat(document.getElementById('fMilitary').value) || 0,
-    facility: document.querySelector('input[name="fFacility"]:checked')?.value || ''
-  };
-}
-
-function isDirty(cur) {
-  if (!originalSnapshot) return false;
-  return cur.owner    !== originalSnapshot.owner    ||
-         cur.military !== originalSnapshot.military  ||
-         cur.facility !== originalSnapshot.facility;
-}
-
-function updateDiff() {
-  if (!selectedStateId) return;
-  const cur = currentFormValues();
-  const orig = pendingChanges[selectedStateId] ? originalSnapshot : originalSnapshot;
-  const strip = document.getElementById('diffStrip');
-
-  const diffs = [];
-  const labels = { owner:'所有国', military:'軍事力', facility:'施設' };
-  Object.keys(labels).forEach(k => {
-    const before = originalSnapshot[k];
-    const after  = cur[k];
-    if (String(before) !== String(after)) {
-      diffs.push({ key: labels[k], before, after });
+    const mapContainer = document.getElementById('map-container');
+    const handleClickLogic = (e, cx, cy) => {
+        if (Math.hypot(cx-touchStartX, cy-touchStartY) > DRAG_THRESHOLD) return;
+        const p = e.target.closest('path');
+        if (!p) return;
+        p.classList.remove('flashing'); void p.offsetWidth; p.classList.add('flashing');
+        setTimeout(() => p.classList.remove('flashing'), 1000);
+        if (window.innerWidth <= 768)
+            document.getElementById('infoBox').innerHTML = `<p style="text-align:center;color:var(--text2);">${p.id}</p>`;
+        handleMapClick(p.id);
+    };
+    mapContainer.addEventListener('mousedown', e => { touchStartX=e.clientX; touchStartY=e.clientY; });
+    mapContainer.addEventListener('click',     e => handleClickLogic(e, e.clientX, e.clientY));
+    mapContainer.addEventListener('touchend',  e => {
+        if (e.changedTouches.length > 0) { const t=e.changedTouches[0]; handleClickLogic(e,t.clientX,t.clientY); }
+    });
+    if (window.innerWidth > 768) {
+        makeDraggable(document.getElementById('sim-panel'),  document.getElementById('sim-header'));
+        makeDraggable(document.getElementById('info-panel'), document.getElementById('info-header'));
     }
-  });
-
-  if (diffs.length === 0) {
-    strip.classList.remove('visible');
-  } else {
-    strip.classList.add('visible');
-    strip.innerHTML = diffs.map(d =>
-      `<div class="diff-row">
-        <span class="diff-key">${d.key}</span>
-        <div style="display:flex;gap:8px;align-items:center;">
-          <span class="diff-val-before">${d.before || 'なし'}</span>
-          <span style="color:var(--text3);">→</span>
-          <span class="diff-val-after">${d.after || 'なし'}</span>
-        </div>
-       </div>`
-    ).join('');
-  }
-}
-
-function updateButtons() {
-  const cur   = currentFormValues();
-  const dirty = isDirty(cur);
-  document.getElementById('btnSave').disabled  = !dirty;
-  document.getElementById('btnReset').disabled = !dirty;
 }
 
 // =========================================================
-// RESET
+// 入力モード
 // =========================================================
-function resetSelected() {
-  if (!selectedStateId || !originalSnapshot) return;
-  fillForm(selectedStateId, originalSnapshot);
-  delete pendingChanges[selectedStateId];
-  colorizeMap();
-  renderQueue();
-  updateDiff();
-  updateButtons();
+function setInputMode(mode) {
+    inputTargetMode = mode;
+    const fromEl = document.getElementById('fromInput');
+    const toEl   = document.getElementById('toInput');
+    fromEl.classList.remove('selecting');
+    toEl.classList.remove('selecting');
+    if (mode === 'from') { fromEl.classList.add('selecting'); toEl.value = ""; }
+    else if (mode === 'to') { toEl.classList.add('selecting'); }
+}
+
+function switchMode() {
+    const m = document.querySelector('input[name="missionMode"]:checked').value;
+    document.getElementById('lblAttack').className  = m==='ATTACK'  ? 'active-atk' : '';
+    document.getElementById('lblRetreat').className = m==='RETREAT' ? 'active-ret' : '';
+    document.getElementById('lblDeploy').className  = m==='DEPLOY'  ? 'active-dep' : '';
+
+    document.getElementById('fromInput').value = "";
+    document.getElementById('toInput').value   = "";
+    document.getElementById('powerAlert').style.display = 'none';
+
+    const powerInput = document.getElementById('attackPower');
+    const toInput    = document.getElementById('toInput');
+    const arrow      = document.getElementById('arrowLabel');
+    const ordersSection = document.getElementById('ordersSection');
+    const militaryUpdateArea = document.getElementById('militaryUpdateArea');
+
+    if (m === 'ATTACK') {
+        toInput.placeholder = "To (敵地)"; toInput.disabled = false;
+        powerInput.value = 100; powerInput.disabled = false; powerInput.placeholder = "兵数";
+        arrow.textContent = "⚔️";
+        document.getElementById('addOrderBtn').textContent = "追加";
+        ordersSection.style.display = 'block';
+        militaryUpdateArea.style.display = Object.keys(pendingGarrisons).length > 0 ? 'block' : 'none';
+    } else if (m === 'RETREAT') {
+        toInput.placeholder = "撤退先(自国隣接)"; toInput.disabled = false;
+        powerInput.value = ""; powerInput.disabled = false; powerInput.placeholder = "撤退兵数(空=全員)";
+        arrow.textContent = "🏳️";
+        document.getElementById('addOrderBtn').textContent = "撤退指示";
+        ordersSection.style.display = 'block';
+        militaryUpdateArea.style.display = Object.keys(pendingGarrisons).length > 0 ? 'block' : 'none';
+    } else if (m === 'DEPLOY') {
+        toInput.placeholder = "-(不要)"; toInput.disabled = true;
+        powerInput.value = 100; powerInput.disabled = false; powerInput.placeholder = "配置兵数";
+        arrow.textContent = "🪖";
+        document.getElementById('addOrderBtn').textContent = "配置を反映";
+        ordersSection.style.display = 'none';
+        militaryUpdateArea.style.display = 'block';
+    }
+    syncPendingStateUI();
 }
 
 // =========================================================
-// SAVE (単体 → API送信)
+// マップクリック
 // =========================================================
-function saveSelected() {
-  if (!selectedStateId) return;
-  const cur = currentFormValues();
+function handleMapClick(id) {
+    if (isClickLocked) return;
+    showInfo(id);
 
-  const btn = document.getElementById('btnSave');
-  btn.disabled = true;
-  btn.textContent = '送信中…';
+    const r = mapData.find(x => x[0] === id);
+    const missionMode = document.querySelector('input[name="missionMode"]:checked').value;
 
-  const payload = {
-    action:   'ADMIN_UPDATE_STATE',
-    stateId:  selectedStateId,
-    owner:    cur.owner,
-    military: cur.military,
-    facility: cur.facility
-  };
 
-  fetch(API_URL, { method: 'POST', body: JSON.stringify(payload) })
-    .then(r => r.json())
-    .then(data => {
-      if (data.status === 'error') throw new Error(data.message || 'エラー');
+    if (!inputTargetMode) return;
 
-      // ローカルデータ更新
-      const row = getRowById(selectedStateId);
-      if (row) {
-        const oi = ownerIdx(), mi = milIdx(), fi = flagIdx();
-        if (oi >= 0) row[oi] = cur.owner;
-        if (mi >= 0) row[mi] = cur.military;
-        if (fi >= 0) row[fi] = cur.facility;
-      }
+    if (inputTargetMode === 'from') {
+        if (!r || getOwner(r) !== currentPlayer) { alert("自国領土のみ選択可能です"); return; }
+        // 侵攻モード: From は港のあるステートのみ（上陸攻撃の発信元）
+        if (missionMode === 'ATTACK') {
+            const myPorts = getMyPortStates();
+            // 通常陸路攻撃は港不要、海路攻撃のみ港必要 → From選択は制限しない（To選択時に判定）
+        }
+        document.getElementById('fromInput').value = id;
+        setInputMode(missionMode === 'DEPLOY' ? null : 'to');
 
-      originalSnapshot = { ...cur };
-      delete pendingChanges[selectedStateId];
-      colorizeMap();
-      renderQueue();
-      updateDiff();
-      updateButtons();
-      setStatus('ok', `${selectedStateId} 保存完了`);
-      toast(`✓ ${selectedStateId} を保存しました`, 'ok');
-    })
-    .catch(err => {
-      toast(`保存失敗: ${err.message}`, 'err');
-    })
-    .finally(() => {
-      btn.disabled = false;
-      btn.textContent = '保存';
+    } else if (inputTargetMode === 'to') {
+        const fromVal = document.getElementById('fromInput').value;
+        if (!fromVal) { alert("先にFrom(出発地)を選択してください"); setInputMode('from'); return; }
+
+        if (missionMode === 'RETREAT') {
+            if (!r || getOwner(r) !== currentPlayer) { alert("撤退先は自国領土のみ選択可能です"); return; }
+            if (id === fromVal) { alert("撤退先はFromと異なる領土を選択してください"); return; }
+            if (!(adjacency[fromVal]||[]).includes(id)) { alert("撤退先はFromに隣接したステートのみ指定できます"); return; }
+            document.getElementById('toInput').value = id; setInputMode(null);
+
+        } else { // ATTACK
+            if (r && getOwner(r) === currentPlayer) { alert("自国領土は攻撃できません"); return; }
+            if (!checkAttackValid(fromVal, id)) return;
+
+            // 兵力ヒント表示
+            const maxPow = getStateAvailableMilitary(fromVal);
+            const pow    = parseInt(document.getElementById('attackPower').value)||0;
+            const alertEl = document.getElementById('powerAlert');
+            if (pow > maxPow) {
+                alertEl.textContent = `⚠️ ${fromVal} の軍事力は ${maxPow} です`;
+                alertEl.style.display = 'block';
+            } else { alertEl.style.display = 'none'; }
+
+            document.getElementById('toInput').value = id; setInputMode(null);
+        }
+
+        isClickLocked = true;
+        setTimeout(() => { isClickLocked = false; }, 500);
+    }
+}
+
+// =========================================================
+// 攻撃バリデーション
+// =========================================================
+function checkAdjacency(from, to) {
+    const fAdj = adjacency[from] || [];
+    const tAdj = adjacency[to]   || [];
+    // 陸路隣接
+    if (fAdj.includes(to)) return { ok: true, sea: false };
+    // 海路: From が自国の港ステート かつ 双方が「海」に隣接
+    const myPorts = getMyPortStates();
+    if (myPorts.has(from) && fAdj.includes('海') && tAdj.includes('海')) {
+        return { ok: true, sea: true };
+    }
+    return { ok: false, sea: false };
+}
+
+function checkAttackValid(from, to) {
+    const adj = checkAdjacency(from, to);
+    if (!adj.ok) { alert("隣接なし / 海路不可（Fromに港が必要です）"); return false; }
+
+    const r  = mapData.find(x => x[0] === to);
+    const tc = r ? getOwner(r) : null;
+
+    // 所有国が存在し、自国でも中立でも空でもない場合 → 宣戦布告チェック
+    if (tc && tc !== currentPlayer && tc !== "中立" && tc !== "") {
+        if (!(window.myEnemies || []).includes(tc)) {
+            alert("宣戦布告が必要です");
+            return false;
+        }
+    }
+    // 所有国が存在しない（無所属）ステートへの攻撃も宣戦布告なしでは不可
+    if (!tc || tc === "") {
+        alert("無所属ステートには攻撃できません");
+        return false;
+    }
+    return true;
+}
+
+// =========================================================
+// 命令追加
+// =========================================================
+function checkDuplicate(mode, from, to) {
+    const mName = mode==='ATTACK'?'攻撃':mode==='RETREAT'?'撤退':'配置';
+    const localDup = orders.some(o => {
+        if (o.mission!==mName || o.from!==from) return false;
+        if (mode==='ATTACK' && o.to!==to) return false;
+        return true;
+    });
+    if (localDup) return true;
+    return serverQueueData.some(row => {
+        if (row[1]!==currentPlayer || row[6]!==mName || row[2]!==from) return false;
+        if (mode==='ATTACK' && row[3]!==to) return false;
+        return true;
     });
 }
 
-// =========================================================
-// 変更キュー表示
-// =========================================================
-function renderQueue() {
-  const entries = Object.entries(pendingChanges);
-  const section = document.getElementById('queueSection');
-  const list    = document.getElementById('queueList');
-  const count   = document.getElementById('queueCount');
+function addOrder() {
+    const mode = document.querySelector('input[name="missionMode"]:checked').value;
+    const from = document.getElementById('fromInput').value;
+    if (!from) return alert("Fromを選択してください");
 
-  if (entries.length === 0) {
-    section.style.display = 'none';
-    return;
-  }
+    const availableFrom = getStateAvailableMilitary(from);
 
-  section.style.display = '';
-  count.textContent = `(${entries.length})`;
-  list.innerHTML = entries.map(([sid, ch]) => {
-    const orig = getRowById(sid);
-    const badges = [];
-    if (orig && getOwner(orig) !== ch.owner)
-      badges.push(`<span class="badge badge-owner">${ch.owner}</span>`);
-    if (orig && getMilitary(orig) !== ch.military)
-    if (orig && getFacility(orig) !== ch.facility && ch.facility)
-      badges.push(`<span class="badge badge-fac">${ch.facility}</span>`);
-    return `<div class="queue-item" style="cursor:pointer;" onclick="selectState('${sid}')">
-      <span class="queue-state">${sid}</span>
-      <div class="queue-badges">${badges.join('')}</div>
-    </div>`;
-  }).join('');
+    if (mode === 'ATTACK') {
+        const to = document.getElementById('toInput').value;
+        if (!to) return alert("Toを選択してください");
+        if (from === to) return alert("出発元と出発先に同じステートは指定できません");
+        if (checkDuplicate('ATTACK', from, to)) return alert("既に同じ攻撃命令が存在します");
+
+        const pow = parseInt(document.getElementById('attackPower').value);
+        if (isNaN(pow) || pow <= 0) return alert("兵力は1以上で指定してください");
+        if (pow > availableFrom) return alert(`${from} からは ${availableFrom} までしか出せません`);
+
+        const adj = checkAdjacency(from, to);
+        const type = adj.sea ? "SEA" : "LAND";
+        orders.push({ type, mission:"攻撃", from, to, power:pow });
+
+    } else if (mode === 'RETREAT') {
+        const to = document.getElementById('toInput').value;
+        if (!to) return alert("撤退先を選択してください");
+        if (from === to) return alert("出発元と出発先に同じステートは指定できません");
+        if (checkDuplicate('RETREAT', from, to)) return alert("この領土からの撤退命令は既に存在します");
+
+        const powVal = document.getElementById('attackPower').value.trim();
+        const pow = powVal === "" ? 0 : parseInt(powVal);
+        if (powVal !== "" && (isNaN(pow) || pow <= 0)) return alert("撤退兵数は1以上で指定してください");
+        if (pow > availableFrom) return alert(`${from} からは ${availableFrom} までしか撤退できません`);
+        if (pow === 0 && availableFrom <= 0) return alert(`${from} に動かせる軍事力がありません`);
+
+        orders.push({ type:"LAND", mission:"撤退", from, to, power:pow });
+
+    } else if (mode === 'DEPLOY') {
+        const deployable = getDeployableStates();
+        if (!deployable.has(from))
+            return alert(`${from} は配置不可ステートです
+（首都または補給可能な港湾網から自国領土でつながっていません）`);
+
+        const pow = parseInt(document.getElementById('attackPower').value);
+        if (isNaN(pow) || pow <= 0) return alert("配置兵数は1以上で指定してください");
+
+        const availableHand = getAvailableHandMilitary();
+        if (pow > availableHand)
+            return alert(`手札軍事力が不足しています
+現在の手札残: ${availableHand}`);
+
+        applyDeployToState(from, pow);
+        document.getElementById('fromInput').value = "";
+        document.getElementById('toInput').value   = "";
+        document.getElementById('powerAlert').style.display = 'none';
+        return;
+    }
+
+    renderOrders();
+    updateCountryStatsUI();
+    document.getElementById('fromInput').value = "";
+    document.getElementById('toInput').value   = "";
+    document.getElementById('powerAlert').style.display = 'none';
+}
+
+function renderOrders() {
+    const tb = document.querySelector('#orderTable tbody');
+    tb.innerHTML = '';
+    orders.forEach((o, i) => {
+        const color = o.mission==='攻撃'?'#f87171':o.mission==='配置'?'#fb923c':'#60a5fa';
+        const pwStr = o.mission==='撤退' ? (o.power>0?o.power:"全員") : o.power;
+        const toStr = o.mission==='配置' ? '手札→' + o.from : (o.to||'-');
+        const tr    = document.createElement('tr');
+        tr.innerHTML = `<td style="color:${color};font-weight:bold;">${o.mission.charAt(0)}</td>
+                        <td>${o.from}</td><td>${toStr}</td><td>${pwStr}</td>
+                        <td><button onclick="delOrder(${i})" style="color:#f87171;border:none;background:none;cursor:pointer;font-size:1em;">×</button></td>`;
+        tb.appendChild(tr);
+    });
+    renderArrows();
+}
+window.delOrder = (i) => { orders.splice(i,1); renderOrders(); updateCountryStatsUI(); };
+
+// =========================================================
+// 送信（配置命令の分だけ即座に手札を減らす）
+// =========================================================
+function sendOrders() {
+    const btn = document.getElementById('sendBtn');
+    if (orders.length === 0) return alert("命令なし");
+
+    btn.disabled = true; btn.textContent = "送信中...";
+    fetch(API_URL, { method:'POST', body: JSON.stringify({ country: currentPlayer, attacks: orders }) })
+    .then(r => r.json())
+    .then(data => {
+        alert(data.message);
+        orders = [];
+        renderOrders();
+        updateCountryStatsUI();
+        loadGameData();
+    })
+    .catch(() => alert("送信エラー"))
+    .finally(() => { btn.disabled=false; btn.textContent="📤 命令送信"; });
+}
+
+// loadGameData後にlocalCommittedHandをリセット（サーバーデータで上書き）
+function sendMilitaryUpdates() {
+    const entries = Object.entries(pendingGarrisons);
+    if (entries.length === 0) return alert("配置変更がありません");
+    const btn   = document.getElementById('btnUpdateMilitary');
+    const spent = getPendingDeployTotal();
+    btn.disabled = true; btn.textContent = "適用中...";
+    fetch(API_URL, {
+        method: 'POST',
+        body: JSON.stringify({
+            action:   "UPDATE_MILITARY",
+            country:  currentPlayer,
+            updates:  pendingGarrisons,
+            spentHand: spent
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        alert(data.message || "配置を反映しました");
+        if (data.remainingMilitary !== undefined &&
+            data.remainingMilitary !== null &&
+            data.remainingMilitary !== '') {
+            handOverride       = Math.max(0, parseInt(data.remainingMilitary) || 0);
+            localCommittedHand = 0;
+        } else {
+            localCommittedHand += spent;
+        }
+        pendingGarrisons = {};
+        syncPendingStateUI();
+        updateCountryStatsUI();
+        // サーバー書き込み完了を待ってからデータ再取得
+        setTimeout(() => loadGameData(), 800);
+    })
+    .catch(() => alert("エラーが発生しました"))
+    .finally(() => { btn.disabled = false; btn.textContent = "配置を適用"; });
+}
+
+
+// =========================================================
+// 情報パネル（補給度 + 配置可否）
+// =========================================================
+function showInfo(id) {
+    const r = mapData.find(x => x[0] === id);
+    if (!r) return;
+    const b = document.getElementById('infoBox');
+
+    const supplyMap = calcSupply();
+    const deployable = getDeployableStates();
+    const supply = supplyMap[id];
+    const previewMilitary = getStateMilitaryPreview(true)[id] || 0;
+    const flagInfo = getFlagVisual(getFlag(r));
+    const ownerName = getOwner(r);
+
+    let supplyStr='—', supplyColor='#8899b0';
+    if (supply !== undefined) {
+        supplyStr = supply + '%';
+        supplyColor = supply >= 80 ? '#6fcf97' : supply >= 50 ? '#f6b93b' : supply > 0 ? '#f87171' : '#556';
+    }
+    const barW = supply !== undefined ? Math.max(0, Math.min(100, supply)) : 0;
+    const depStr = deployable.has(id)
+        ? '<span style="color:#6fcf97;font-size:0.8em;">✅ 配置可</span>'
+        : '<span style="color:#556;font-size:0.8em;">❌ 配置不可</span>';
+
+    let h = `<h3 style="margin:0 0 6px;color:var(--text);font-size:1em;">${id}</h3>`;
+    h += `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">`;
+    h += `<span style="background:${flagInfo.color};color:${flagInfo.label==='航路'?'#001018':'#111'};padding:3px 8px;border-radius:999px;font-size:0.76em;font-weight:bold;border:1px solid ${flagInfo.stroke};box-shadow:0 0 10px ${flagInfo.color}55;">${flagInfo.label}</span>`;
+    h += `<span style="background:var(--bg3);padding:3px 8px;border-radius:999px;font-size:0.76em;color:var(--text);">軍事力 ${previewMilitary}</span>`;
+    h += `<span style="background:${getCountryColor(ownerName, '#2a2e3a')};padding:3px 8px;border-radius:999px;font-size:0.76em;color:#fff;border:1px solid rgba(255,255,255,0.25);">${ownerName || '無所属'}</span>`;
+    h += `</div>`;
+    h += `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;font-size:0.76em;">`;
+    h += `<span style="background:var(--bg3);padding:3px 8px;border-radius:999px;color:var(--text);">技術 ${getCountryTech(ownerName) || 0}</span>`;
+    h += `<span style="background:var(--bg3);padding:3px 8px;border-radius:999px;color:var(--text);">充足 ${getCountryFulfillment(ownerName) || 0}</span>`;
+    h += `</div>`;
+    h += `<div style="background:var(--bg3);border-left:3px solid ${supplyColor};padding:6px 8px;margin-bottom:6px;border-radius:4px;font-size:0.82em;">`;
+    h += `<strong style="color:var(--text2);">補給度:</strong> <span style="color:${supplyColor};font-size:1.15em;font-weight:bold;">${supplyStr}</span>`;
+    h += `<div style="margin-top:4px;background:var(--border);border-radius:2px;height:6px;"><div style="width:${barW}%;height:100%;background:${supplyColor};border-radius:2px;"></div></div>`;
+    h += `<div style="margin-top:4px;">${depStr}</div></div>`;
+    h += `<ul style="margin:0;padding-left:14px;font-size:0.8em;color:var(--text2);">`;
+    mapHeaders.forEach((hd, i) => {
+        if (['Color','ID'].includes(hd)) return;
+        let value = r[i];
+        if (hd === '軍事力') value = previewMilitary;
+        if (hd === '首都プラグ') value = flagInfo.label;
+        h += `<li style="margin-bottom:2px;"><strong style="color:var(--text);">${hd}:</strong> ${value}</li>`;
+    });
+    b.innerHTML = h + "</ul>";
 }
 
 // =========================================================
-// STATUS / TOAST
+// 外交
 // =========================================================
-function setStatus(type, text) {
-  const dot  = document.getElementById('statusDot');
-  const span = document.getElementById('statusText');
-  dot.className  = 'status-dot ' + (type || '');
-  span.textContent = text;
+function setupDiplomacyUI() {
+    const sel = document.getElementById('targetCountrySelect');
+    sel.innerHTML = '<option value="">国選択</option>';
+    countryDataList.forEach(row => {
+        if (row[0] !== currentPlayer) {
+            const opt=document.createElement('option'); opt.value=row[0]; opt.textContent=row[0]; sel.appendChild(opt);
+        }
+    });
+}
+function updateWarListUI() {
+    const enemies=[];
+    warData.forEach(row => {
+        if (row[0]===currentPlayer) enemies.push(row[1]);
+        if (row[1]===currentPlayer) enemies.push(row[0]);
+    });
+    const u = [...new Set(enemies)];
+    document.getElementById('warListDisplay').innerHTML = u.length===0?'なし':u.map(e=>`<span class="war-tag">${e}</span>`).join(' ');
+    window.myEnemies = u;
+}
+function declareWar() {
+    const t = document.getElementById('targetCountrySelect').value;
+    if (!t || !confirm(`${t} に宣戦布告しますか？`)) return;
+    fetch(API_URL, {
+        method: 'POST',
+        body: JSON.stringify({ action: "DECLARE_WAR", declarer: currentPlayer, target: t })
+    })
+    .then(r => r.json())
+    .then(d => { alert(d.message); if (d.status === 'success') loadGameData(); })
+    .catch(() => alert("宣戦布告の送信に失敗しました。通信状況を確認してください。"));
 }
 
-function toast(msg, type = '') {
-  const wrap = document.getElementById('toastWrap');
-  const el   = document.createElement('div');
-  el.className = `toast ${type}`;
-  el.textContent = msg;
-  wrap.appendChild(el);
-  setTimeout(() => el.remove(), 3000);
+// =========================================================
+// タブ
+// =========================================================
+function setupTabs() {
+    const c = document.getElementById('tab-container');
+    c.innerHTML = '';
+    mapHeaders.forEach((h, i) => {
+        if (i===0 || h==='Color' || h==='ID') return;
+        const b = document.createElement('button');
+        b.textContent = h === '首都プラグ' ? '首都/港/航路' : h;
+        if (h===currentTab) b.classList.add('active');
+        b.onclick = () => {
+            currentTab=h;
+            document.querySelectorAll('#tab-container button').forEach(x=>x.classList.remove('active'));
+            b.classList.add('active'); renderMap();
+        };
+        c.appendChild(b);
+    });
+    const sb = document.createElement('button');
+    sb.textContent = '補給度';
+    if (currentTab==='補給度') sb.classList.add('active');
+    sb.onclick = () => {
+        currentTab='補給度';
+        document.querySelectorAll('#tab-container button').forEach(x=>x.classList.remove('active'));
+        sb.classList.add('active'); renderMap();
+    };
+    c.appendChild(sb);
+}
+
+// =========================================================
+// マップ描画
+// =========================================================
+function renderMap() {
+    const paths = document.querySelectorAll('path');
+    const ci = mapHeaders.indexOf(currentTab);
+    const clrI = mapHeaders.indexOf('Color');
+    const tColors = {'1':'#2a4a6a','2':'#1e4d30','3':'#4a3d1a','4':'#5a2a10'};
+    const isCountryTab = ['国','所有国'].includes(currentTab);
+    const isSupplyTab = currentTab === '補給度';
+    const supplyMap = isSupplyTab ? calcSupply() : null;
+    const militaryPreview = getStateMilitaryPreview(true);
+
+    paths.forEach(p => {
+        const r = mapData.find(x => String(x[0]).trim() === p.id.trim());
+        if (!r) return;
+
+        const owner = getOwner(r);
+        const mapColorFallback = clrI > -1 ? normalizeHexColor(r[clrI]) : '';
+        const ownerColor = owner ? getCountryColor(owner, mapColorFallback || '#586274') : '#586274';
+        let fill = '#2b3240';
+
+        if (isSupplyTab) {
+            fill = getGradientColorBy100(supplyMap[p.id] || 0);
+        } else if (currentTab === '地形(1-4)') {
+            fill = tColors[String(r[ci])] || '#3a4354';
+        } else if (currentTab === '首都プラグ') {
+            fill = getFlagVisual(getFlag(r) || String(r[ci] || '')).color;
+        } else if (isCountryTab) {
+            fill = owner ? ownerColor : '#4a5366';
+        } else if (currentTab === '軍事力') {
+            fill = getGradientColorBy100(militaryPreview[p.id] || 0);
+        } else if (String(currentTab).includes('開発')) {
+            fill = getGradientColorBy100(parseFloat(r[ci]) || 0);
+        } else {
+            const v = parseFloat(r[ci]) || 0;
+            const intensity = Math.min(1, v / 200);
+            const rr = Math.round(28 + 190 * intensity);
+            const gg = Math.round(30 + 36 * (1 - intensity));
+            const bb = Math.round(30 + 14 * (1 - intensity));
+            fill = `rgb(${rr},${gg},${bb})`;
+        }
+
+        let stroke = owner ? (isCountryTab ? '#9aa5b5' : ownerColor) : '#b6c0d0';
+        if (isCountryTab && owner === currentPlayer) stroke = '#f1c40f';
+
+        p.style.fill = fill;
+        p.style.stroke = stroke;
+        p.style.strokeWidth = owner === currentPlayer ? (isCountryTab ? '1.8px' : '2px') : (isCountryTab ? '1px' : '1.4px');
+        p.style.opacity = '1';
+        if (owner === currentPlayer) p.parentNode.appendChild(p);
+    });
+
+    const innerSvg = document.querySelector('#wrapper svg');
+    if (innerSvg && !panZoomInstance) {
+        const eventsHandler = {
+            haltEventListeners:['touchstart','touchend','touchmove','leave','touchcancel','gesturestart','gesturechange','gestureend'],
+            init(o) {
+                let s=1,px=0,py=0; const i=o.instance;
+                this.h = Hammer(o.svgElement,{inputClass:Hammer.SUPPORT_POINTER_EVENTS?Hammer.PointerEventInput:Hammer.TouchInput});
+                this.h.get('pinch').set({enable:true});
+                this.h.on('doubletap',()=>i.zoomIn());
+                this.h.on('panstart panmove',e=>{
+                    if(e.type==='panstart'){px=0;py=0;}
+                    i.panBy({x:e.deltaX-px,y:e.deltaY-py}); px=e.deltaX; py=e.deltaY;
+                });
+                this.h.on('pinchstart pinchmove',e=>{
+                    if(e.type==='pinchstart') s=i.getZoom();
+                    i.zoomAtPoint(s*e.scale,{x:e.center.x,y:e.center.y});
+                });
+                o.svgElement.addEventListener('touchstart',e=>{
+                    touchStartX=e.touches[0].clientX; touchStartY=e.touches[0].clientY;
+                },{passive:false});
+            },
+            destroy(){ this.h.destroy(); }
+        };
+        panZoomInstance = svgPanZoom(innerSvg, {
+            zoomEnabled:true, controlIconsEnabled:false,
+            fit:true, center:true, minZoom:0.5, maxZoom:50,
+            customEventsHandler: eventsHandler,
+            onZoom: ()=>{ renderArrows(); renderStrategicMarkers(); },
+            onPan:  ()=>{ renderArrows(); renderStrategicMarkers(); }
+        });
+    }
+    setTimeout(() => { renderArrows(); renderStrategicMarkers(); }, 50);
+}
+
+// =========================================================
+// SVG矢印描画（ズーム逆補正で画面サイズ一定）
+// =========================================================
+function svgPointFromClient(svg, x, y) {
+    if (!svg || !svg.createSVGPoint) return null;
+    const pt = svg.createSVGPoint();
+    pt.x = x; pt.y = y;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return null;
+    const res = pt.matrixTransform(ctm.inverse());
+    return { x: res.x, y: res.y };
+}
+
+function getPathCenter(id) {
+    const svg = document.querySelector('#wrapper svg');
+    const p = document.getElementById(id);
+    if (!svg || !p) return null;
+    try {
+        const rect = p.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        return svgPointFromClient(svg, cx, cy);
+    } catch(e) {
+        return null;
+    }
+}
+
+function renderStrategicMarkers() {
+    const svg = document.querySelector('#wrapper svg');
+    if (!svg) return;
+
+    let layer = document.getElementById('strategic-marker-layer');
+    if (layer) layer.remove();
+    layer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    layer.id = 'strategic-marker-layer';
+    layer.style.pointerEvents = 'none';
+
+    const sc = getOverlayScale();
+
+    mapData.forEach(r => {
+        const flagInfo = getFlagVisual(getFlag(r));
+        if (!['首都', '港'].includes(flagInfo.label)) return;
+        const c = getPathCenter(r[0]);
+        if (!c) return;
+
+        const radius = flagInfo.label === '首都' ? 14 * sc : 11 * sc;
+        const outer = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        outer.setAttribute('cx', c.x);
+        outer.setAttribute('cy', c.y);
+        outer.setAttribute('r', radius);
+        outer.setAttribute('fill', flagInfo.color);
+        outer.setAttribute('stroke', flagInfo.stroke);
+        outer.setAttribute('stroke-width', 2.8 * sc);
+        outer.setAttribute('opacity', '0.95');
+        layer.appendChild(outer);
+
+        const inner = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        inner.setAttribute('cx', c.x);
+        inner.setAttribute('cy', c.y);
+        inner.setAttribute('r', radius * 0.42);
+        inner.setAttribute('fill', '#12151a');
+        inner.setAttribute('opacity', '0.9');
+        layer.appendChild(inner);
+
+        const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        txt.setAttribute('x', c.x);
+        txt.setAttribute('y', c.y + (flagInfo.label === '首都' ? 4.6 * sc : 3.8 * sc));
+        txt.setAttribute('text-anchor', 'middle');
+        txt.setAttribute('font-size', flagInfo.label === '首都' ? 13 * sc : 10 * sc);
+        txt.setAttribute('font-weight', 'bold');
+        txt.setAttribute('fill', '#ffffff');
+        txt.setAttribute('stroke', '#12151a');
+        txt.setAttribute('stroke-width', 2.8 * sc);
+        txt.setAttribute('paint-order', 'stroke');
+        txt.textContent = flagInfo.short;
+        layer.appendChild(txt);
+    });
+
+    svg.appendChild(layer);
+}
+
+function renderArrows() {
+    const svg = document.querySelector('#wrapper svg');
+    if (!svg) return;
+
+    let layer = document.getElementById('arrow-layer');
+    if (layer) layer.remove();
+    layer = document.createElementNS('http://www.w3.org/2000/svg','g');
+    layer.id = 'arrow-layer';
+    layer.style.pointerEvents = 'none';
+
+    const sc = getOverlayScale();
+
+    let defs = svg.querySelector('defs');
+    if (!defs) { defs=document.createElementNS('http://www.w3.org/2000/svg','defs'); svg.insertBefore(defs,svg.firstChild); }
+
+    const markerDefs = [
+        ['mk-atk','#f87171'],['mk-ret','#60a5fa'],
+        ['mk-atk-s','#c0392b'],['mk-ret-s','#2980b9']
+    ];
+    markerDefs.forEach(([mid])=>{ const old=defs.querySelector(`#${mid}`); if(old) old.remove(); });
+    markerDefs.forEach(([mid,color])=>{
+        const m=document.createElementNS('http://www.w3.org/2000/svg','marker');
+        m.setAttribute('id',mid);
+        m.setAttribute('markerUnits','userSpaceOnUse');
+        m.setAttribute('markerWidth', 16*sc);
+        m.setAttribute('markerHeight', 12*sc);
+        m.setAttribute('refX', 13*sc);
+        m.setAttribute('refY', 6*sc);
+        m.setAttribute('orient','auto');
+        const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+        path.setAttribute('d',`M0,0 L${16*sc},${6*sc} L0,${12*sc} Z`);
+        path.setAttribute('fill',color);
+        m.appendChild(path); defs.appendChild(m);
+    });
+
+    function drawArrow(fromId, toId, color, markerId, dashed, label) {
+        const fc=getPathCenter(fromId), tc=getPathCenter(toId);
+        if (!fc||!tc) return;
+        const lw = 4.2*sc;
+        const line=document.createElementNS('http://www.w3.org/2000/svg','line');
+        line.setAttribute('x1',fc.x); line.setAttribute('y1',fc.y);
+        line.setAttribute('x2',tc.x); line.setAttribute('y2',tc.y);
+        line.setAttribute('stroke',color);
+        line.setAttribute('stroke-width',lw);
+        line.setAttribute('stroke-linecap','round');
+        if (dashed) line.setAttribute('stroke-dasharray',`${10*sc},${4*sc}`);
+        line.setAttribute('marker-end',`url(#${markerId})`);
+        line.setAttribute('opacity','0.9');
+        layer.appendChild(line);
+
+        if (label) {
+            const mx=(fc.x+tc.x)/2, my=(fc.y+tc.y)/2;
+            const txt=document.createElementNS('http://www.w3.org/2000/svg','text');
+            txt.setAttribute('x',mx); txt.setAttribute('y',my-6*sc);
+            txt.setAttribute('text-anchor','middle');
+            txt.setAttribute('font-size',13*sc);
+            txt.setAttribute('fill',color);
+            txt.setAttribute('font-weight','bold');
+            txt.setAttribute('stroke','#12151a');
+            txt.setAttribute('stroke-width',3.4*sc);
+            txt.setAttribute('paint-order','stroke');
+            txt.textContent=label;
+            layer.appendChild(txt);
+        }
+    }
+
+    orders.forEach(o => {
+        if (!o.to || o.from===o.to) return;
+        const color=o.mission==='攻撃'?'#f87171':'#60a5fa';
+        const mid  =o.mission==='攻撃'?'mk-atk':'mk-ret';
+        const lbl  =o.mission==='攻撃'?`⚔${o.power}`:`🏳${o.power||'全'}`;
+        drawArrow(o.from, o.to, color, mid, false, lbl);
+    });
+
+    serverQueueData.filter(r=>r[1]===currentPlayer).forEach(o=>{
+        const mission=o[6], from=o[2], to=o[3], power=o[4];
+        if (mission === '配置') return;
+        if (!to || from===to) return;
+        const color=mission==='攻撃'?'#c0392b':'#2980b9';
+        const mid  =mission==='攻撃'?'mk-atk-s':'mk-ret-s';
+        const lbl  =mission==='攻撃'?`⚔${power}`:`🏳${power||'全'}`;
+        drawArrow(from, to, color, mid, true, lbl);
+    });
+
+    svg.appendChild(layer);
+}
+
+// =========================================================
+// ドラッグ可能パネル
+// =========================================================
+function makeDraggable(el, h) {
+    let d=false, sx, sy, il, it;
+    h.addEventListener('mousedown', ev=>{ d=true; sx=ev.clientX; sy=ev.clientY; const r=el.getBoundingClientRect(); il=r.left; it=r.top; });
+    document.addEventListener('mousemove', ev=>{ if(d){ el.style.left=(il+ev.clientX-sx)+'px'; el.style.top=(it+ev.clientY-sy)+'px'; } });
+    document.addEventListener('mouseup', ()=>{ d=false; });
 }
 </script>
 </body>
