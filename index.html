@@ -291,7 +291,7 @@ let countryDataList = [], warData = [], serverQueueData = [];
 let orders = [];
 let pendingGarrisons = {};
 let isClickLocked = false;
-let currentTab = "国";
+let currentTab = "所有国";
 let inputTargetMode = null;
 let panZoomInstance = null;
 let touchStartX = 0, touchStartY = 0;
@@ -308,7 +308,10 @@ let localCommittedHand = 0; // 送信済み配置命令の累計
 // ヘルパー: 列インデックス取得
 // =========================================================
 function colIdx(name) { return mapHeaders.indexOf(name); }
-function ownerIdx()   { return colIdx('国') !== -1 ? colIdx('国') : colIdx('所有国'); }
+function ownerColName() {
+    return colIdx('所有国') !== -1 ? '所有国' : (colIdx('国') !== -1 ? '国' : '');
+}
+function ownerIdx()   { const name = ownerColName(); return name ? colIdx(name) : -1; }
 function flagIdx()    { return mapHeaders.findIndex(h => ['首都プラグ','首都フラグ','フラグ'].includes(h)); }
 function devIdx()     { return 3; } // D列 = index 3
 
@@ -1197,6 +1200,9 @@ function declareWar() {
 function setupTabs() {
     const c = document.getElementById('tab-container');
     c.innerHTML = '';
+    if (currentTab !== '補給度' && !mapHeaders.includes(currentTab)) {
+        currentTab = ownerColName() || currentTab;
+    }
     mapHeaders.forEach((h, i) => {
         if (i===0 || h==='Color' || h==='ID') return;
         const b = document.createElement('button');
@@ -1228,7 +1234,7 @@ function renderMap() {
     const ci = mapHeaders.indexOf(currentTab);
     const clrI = mapHeaders.indexOf('Color');
     const tColors = {'1':'#2a4a6a','2':'#1e4d30','3':'#4a3d1a','4':'#5a2a10'};
-    const isCountryTab = ['国','所有国'].includes(currentTab);
+    const isCountryTab = currentTab === ownerColName();
     const isSupplyTab = currentTab === '補給度';
     const supplyMap = isSupplyTab ? calcSupply() : null;
     const militaryPreview = getStateMilitaryPreview(true);
